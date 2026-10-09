@@ -1,5 +1,6 @@
-// Vesta offline cache: serve the app shell from cache, refresh it in the background.
-const CACHE = "vesta-v3";
+// Vesta offline cache. Pages load fresh when online (so updates show right away)
+// and fall back to the cached copy offline; icons and fonts come from cache first.
+const CACHE = "vesta-v5";
 const SHELL = [
   "./",
   "./index.html",
@@ -28,6 +29,20 @@ self.addEventListener("fetch", event => {
   const url = new URL(req.url);
   const isFont = url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com";
   if (url.origin !== self.location.origin && !isFont) return;
+
+  const isPage = req.mode === "navigate" || url.pathname.endsWith("/") || url.pathname.endsWith(".html") || url.pathname.endsWith(".webmanifest");
+
+  if (isPage){
+    event.respondWith(
+      fetch(req, { cache: "no-store" })
+        .then(res => {
+          if (res && res.ok){ const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
+          return res;
+        })
+        .catch(() => caches.match(req).then(hit => hit || caches.match("./index.html")))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.open(CACHE).then(cache =>

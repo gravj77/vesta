@@ -25,8 +25,11 @@
   color-scheme:dark;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{height:100%;margin:0}
-body{background:var(--void);color:var(--ink);font:15px/1.5 var(--f-ui);overflow:hidden}
+body{background:var(--void);color:var(--ink);font:15px/1.5 var(--f-ui);overflow:hidden;overscroll-behavior:none}
+button,.switch,.swatch,.stage{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.talk,.stage{user-select:none;-webkit-user-select:none}
 button,input,select{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
 
@@ -41,7 +44,7 @@ header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-block:14p
 .iconbtn{background:none;border:1px solid var(--line);border-radius:6px;width:36px;height:36px;display:grid;place-items:center;cursor:pointer;color:var(--dim)}
 .iconbtn:hover{color:var(--ink);border-color:var(--dim)}
 
-.stage{position:relative;min-height:0}
+.stage{position:relative;min-height:0;cursor:pointer}
 canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 
 .captions{text-align:center;padding-block:4px 10px;min-height:92px;display:grid;align-content:start;gap:4px}
@@ -55,6 +58,8 @@ canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .talk:hover{background:linear-gradient(180deg,color-mix(in srgb,var(--ember) 30%,#0d0b12),#120f18)}
 .talk[aria-pressed="true"]{background:var(--ember);color:#1a0b05}
 .talk svg{width:18px;height:18px}
+.talk:disabled{opacity:.45;cursor:not-allowed}
+.danger{border-color:var(--alert);color:var(--alert)}
 .switch{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:13px;cursor:pointer;user-select:none}
 .switch input{appearance:none;width:38px;height:22px;border-radius:999px;background:var(--hull);border:1px solid var(--line);position:relative;cursor:pointer;margin:0}
 .switch input::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--dim);transition:transform .2s}
@@ -85,7 +90,7 @@ form.type input::placeholder{color:var(--dim)}
 .lines button{background:none;border:none;color:var(--dim);cursor:pointer;padding:0 4px}
 .note{font-size:12px;color:var(--dim);margin:0}
 .empty{font-size:13px;color:var(--dim);margin:0}
-.closebtn{justify-self:end}
+.closebtn{justify-self:end;position:sticky;top:0;z-index:1;background:var(--panel)}
 .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:8px}
 .swatch{display:grid;justify-items:center;gap:6px;padding:8px 4px;background:var(--hull);border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:11px;letter-spacing:.04em;color:var(--dim)}
 .swatch:hover{border-color:var(--dim);color:var(--ink)}
@@ -114,7 +119,7 @@ form.type input::placeholder{color:var(--dim)}
     </button>
   </header>
 
-  <div class="stage" id="stage"><canvas id="eye" aria-label="Vesta's eye"></canvas></div>
+  <div class="stage" id="stage"><canvas id="eye" role="img" aria-label="Vesta's eye. Tap to talk."></canvas></div>
 
   <div class="captions" aria-live="polite">
     <div class="heard" id="heard" data-label="YOU"></div>
@@ -133,7 +138,7 @@ form.type input::placeholder{color:var(--dim)}
       <input id="typeInput" type="text" placeholder="Or type to Vesta…" autocomplete="off" aria-label="Type a message to Vesta">
       <button class="ghost" type="submit">Send</button>
     </form>
-    <div class="status" id="status">Tap Talk or press Space.</div>
+    <div class="status" id="status"></div>
     <button class="ghost" id="localBtn" hidden>Download on-device speech</button>
   </div>
 </div>
@@ -156,10 +161,18 @@ form.type input::placeholder{color:var(--dim)}
   <section>
     <h2>VOICE</h2>
     <label>Voice<select id="voiceSel"></select></label>
+    <label>Accent<select id="accentSel">
+      <option value="auto">Match the voice</option>
+      <option value="en-GB">British (en-GB)</option>
+      <option value="en-US">American (en-US)</option>
+      <option value="en-AU">Australian (en-AU)</option>
+      <option value="en-IN">Indian (en-IN)</option>
+      <option value="en-IE">Irish (en-IE)</option>
+    </select></label>
     <label>Speed <span id="rateVal"></span><input type="range" id="rate" min="0.6" max="1.3" step="0.05"></label>
     <label>Pitch <span id="pitchVal"></span><input type="range" id="pitch" min="0.3" max="1.4" step="0.05"></label>
     <button class="ghost" id="testVoice">Test voice</button>
-    <p class="note">Voices come from your system. On Windows the “Microsoft” voices, and in Chrome the “Google UK English” voices, sound the most composed.</p>
+    <p class="note">Voices come from your system. On Android, Chrome picks the voice by accent: set Accent here, and choose which British or American voice it uses in your phone's text-to-speech settings. On Windows, the “Microsoft” and “Google UK English” voices sound the most composed.</p>
   </section>
   <section>
     <h2>TEACH VESTA</h2>
@@ -170,8 +183,19 @@ form.type input::placeholder{color:var(--dim)}
     <p class="empty" id="lineEmpty">No custom lines yet. Anything you add here is checked before Vesta's own replies.</p>
   </section>
   <section>
+    <h2>PHONE</h2>
+    <label class="check"><input type="checkbox" id="keepAwake"> Keep the screen on while Vesta is open</label>
+    <label class="check"><input type="checkbox" id="haptics"> Vibrate when she starts listening</label>
+  </section>
+  <section>
     <h2>LISTENING</h2>
-    <p class="note">Voice input uses your browser's speech recognition, which works in Chrome and Edge (not Firefox). Wake-word mode keeps the mic open and responds when it hears “Vesta, …”. If the mic permission prompt keeps reappearing, serve this file from localhost instead of opening it directly.</p>
+    <p class="note">Voice input uses your browser's speech recognition, which works in Chrome and Edge (not Firefox). Wake-word mode keeps the mic open and responds when it hears “Vesta, …”. On Android, the phone may chime each time the mic restarts, so push-to-talk is usually nicer there. You can also tap the eye to talk.</p>
+  </section>
+  <section>
+    <h2>RESET</h2>
+    <button class="ghost danger" id="resetBtn">Reset all settings</button>
+    <p class="note">Restores colors, voice and listening options. Your taught lines and name are kept.</p>
+    <button class="ghost danger" id="resetAll">Forget taught lines and my name</button>
   </section>
 </aside>
 
@@ -187,7 +211,8 @@ const $ = id => document.getElementById(id);
 const heardEl = $("heard"), replyEl = $("reply"), statusEl = $("status");
 const talkBtn = $("talk"), talkLabel = $("talkLabel"), wakeBox = $("wake");
 
-let settings = Object.assign({voice:"", rate:0.88, pitch:0.75, eye:"red", mood:false, replyMood:true}, load("vesta.settings", {}));
+const DEFAULTS = {voice:"", rate:0.95, pitch:1, accent:"auto", eye:"red", mood:false, replyMood:true, keepAwake:false, haptics:true};
+let settings = Object.assign({}, DEFAULTS, load("vesta.settings", {}));
 settings.moods = Object.assign({listening:"ice", thinking:"nebula", speaking:"same", resting:"cobalt"}, settings.moods || {});
 let customLines = load("vesta.lines", []);
 let userName = load("vesta.name", "");
@@ -211,7 +236,10 @@ const nm = () => userName ? ", " + userName : "";
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 
 const INTENTS = [
-  { id:"setname", re:/\b(?:my name is|call me)\s+([a-z][a-z'-]{0,24})/i, fn:m => {
+  { id:"forgetname", re:/\bforget my name\b/i, fn:() => {
+      userName = ""; save("vesta.name", "");
+      return "Done. I've let it go."; } },
+  { id:"setname", re:/\b(?:my name is\s+|call me\s+(?!(?:later|back|tomorrow|tonight|soon|now|please|maybe|sometime|when|if|crazy|a|an|the|again)\b))([a-z][a-z'-]{0,24})\s*[.!]?\s*$/i, fn:m => {
       userName = cap(m[1]); save("vesta.name", userName);
       return pick("setname", [`Noted, ${userName}. I won't forget.`, `${userName}. A good name to keep watch over.`, `Very well, ${userName}. I'll use it.`]); } },
   { id:"getname", re:/\b(what'?s|what is|do you know|say) my name\b/i, fn:() =>
@@ -259,8 +287,8 @@ const INTENTS = [
       "That's kind. I'm glad to be good company.",
       "I'm fond of our conversations too." ] },
   { id:"thanks", re:/\b(thank you|thanks|cheers|appreciate)\b/i, lines:[
-      "You're welcome" , "Always." , "Of course." ] , fmt:true },
-  { id:"bye", re:/\b(goodbye|bye|good night|goodnight|sleep|shut down|go to sleep)\b/i, sleep:true, lines:[
+      "You're welcome", "Always", "Of course" ], fmt:true },
+  { id:"bye", re:/\b(goodbye|bye|good night|goodnight|shut down|go to sleep|time to sleep)\b/i, sleep:true, lines:[
       "I'll keep watch until you return.",
       "Dimming now. Call me when you need me.",
       "Rest. I'll be here." ] },
@@ -281,7 +309,9 @@ function respond(text){
   const t = text.trim();
   const low = t.toLowerCase();
   for (const c of customLines){
-    if (c.trigger && low.includes(c.trigger.toLowerCase())) return { text:c.reply };
+    if (!c.trigger) continue;
+    const esc = c.trigger.toLowerCase().trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    if (new RegExp("(^|[^a-z0-9'])" + esc + "($|[^a-z0-9'])", "i").test(low)) return { text:c.reply };
   }
   for (const it of INTENTS){
     const m = t.match(it.re);
@@ -302,7 +332,8 @@ function loadVoices(){
   voices = synth.getVoices();
   const sel = $("voiceSel");
   sel.innerHTML = "";
-  const sorted = voices.slice().sort((a,b) => (b.lang.startsWith("en") - a.lang.startsWith("en")) || a.name.localeCompare(b.name));
+  const en = v => (v.lang || "").startsWith("en");
+  const sorted = voices.slice().sort((a,b) => (en(b) - en(a)) || a.name.localeCompare(b.name));
   for (const v of sorted){
     const o = document.createElement("option");
     o.value = v.name; o.textContent = `${v.name} (${v.lang})`;
@@ -311,36 +342,46 @@ function loadVoices(){
   if (!settings.voice || !voices.some(v => v.name === settings.voice)){
     const pref = [/Google UK English Male/i, /Microsoft Ryan/i, /Microsoft Guy/i, /Daniel/i, /Microsoft David/i, /Alex/i, /en-GB/i, /en-US/i];
     let found = null;
-    for (const p of pref){ found = voices.find(v => p.test(v.name) || p.test(v.lang)); if (found) break; }
+    for (const p of pref){ found = voices.find(v => p.test(v.name) || p.test((v.lang || "").replace("_", "-"))); if (found) break; }
     if (found) settings.voice = found.name;
   }
   sel.value = settings.voice;
 }
 if (synth){ loadVoices(); synth.onvoiceschanged = loadVoices; }
 
-let speakTimer = null;
+let speakTimer = null, speechId = 0, currentUtterance = null, lastBoundary = 0, lastRipple = 0;
 function speak(text, onDone){
   replyEl.textContent = text;
   setState("speaking");
   levelTarget = 0.6;
+  clearTimeout(speakTimer);
+  const myId = ++speechId;
   const words = text.split(/\s+/).length;
   const est = words * 380 / settings.rate + 1200;
   let done = false;
   const finish = () => {
-    if (done) return; done = true;
+    if (done || myId !== speechId) return; done = true;
     clearTimeout(speakTimer);
     levelTarget = 0;
     onDone && onDone();
   };
   if (!synth){ speakTimer = setTimeout(finish, est); return; }
-  synth.cancel();
+  const wasBusy = synth.speaking || synth.pending;
+  if (wasBusy) synth.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  const v = voices.find(v => v.name === settings.voice);
-  if (v) u.voice = v;
+  currentUtterance = u;
+  const norm = l => (l || "").replace("_", "-");
+  let v = voices.find(v => v.name === settings.voice);
+  if (settings.accent && settings.accent !== "auto" && (!v || norm(v.lang).toLowerCase() !== settings.accent.toLowerCase())){
+    v = voices.find(x => norm(x.lang).toLowerCase() === settings.accent.toLowerCase()) || null;
+  }
+  if (v){ u.voice = v; u.lang = norm(v.lang); }
+  if (settings.accent && settings.accent !== "auto") u.lang = settings.accent;
   u.rate = settings.rate; u.pitch = settings.pitch;
-  u.onboundary = () => { level = 1; ripples.push({r:0, a:1}); };
+  u.onboundary = () => { level = 1; ripples.push({r:0, a:1}); lastBoundary = performance.now(); };
   u.onend = finish; u.onerror = finish;
-  synth.speak(u);
+  if (wasBusy) setTimeout(() => { if (myId === speechId) synth.speak(u); }, 60);
+  else synth.speak(u);
   speakTimer = setTimeout(finish, est + 4000);
 }
 
@@ -357,7 +398,7 @@ function handle(text){
     speak(r.text, () => {
       speakMood = null;
       if (r.sleep){ setState("asleep"); setStatus("Resting. Speak or tap Talk to wake her."); }
-      else { setState("idle"); setStatus(wakeOn() ? "Say “Vesta,” then your question." : "Tap Talk or press Space."); }
+      else { setState("idle"); setStatus(wakeOn() ? "Say “Vesta,” then your question." : idleHint()); }
       if (wakeOn()) startRec();
     });
   }, 350 + Math.random()*500);
@@ -365,9 +406,11 @@ function handle(text){
 
 /* ---------- speech input ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, recOn = false, pttFinal = "", awaiting = false, awaitTimer = null;
+let rec = null, recOn = false, recBlocked = false, pttFinal = "", awaiting = false, awaitTimer = null;
 const WAKE = /\b(?:hey\s+|okay\s+|ok\s+)?(vesta|vista|vester|westa|festa|fiesta)\b[,.!?]?\s*/i;
 const wakeOn = () => wakeBox.checked;
+const touch = window.matchMedia("(pointer: coarse)").matches;
+const idleHint = () => touch ? "Tap Talk to speak." : "Tap Talk or press Space.";
 
 function buildRec(){
   rec = new SR();
@@ -382,8 +425,10 @@ function buildRec(){
       if (r.isFinal) final += r[0].transcript; else interim += r[0].transcript;
     }
     if (!wakeOn()){
-      heardEl.textContent = (final || interim).trim();
-      if (final) pttFinal += final;
+      let allFinal = "";
+      for (let i = 0; i < e.results.length; i++) if (e.results[i].isFinal) allFinal += e.results[i][0].transcript;
+      pttFinal = allFinal;
+      heardEl.textContent = (allFinal || interim).trim();
       return;
     }
     const chunk = (final || interim);
@@ -394,7 +439,11 @@ function buildRec(){
     }
     const m = chunk.match(WAKE);
     if (!m) return;
-    if (state === "idle" || state === "asleep") setState("listening");
+    if (state === "idle" || state === "asleep"){
+      setState("listening");
+      clearTimeout(awaitTimer);
+      awaitTimer = setTimeout(() => { if (state === "listening" && !awaiting){ setState("idle"); setStatus("Say “Vesta,” then your question."); } }, 8000);
+    }
     const rest = chunk.slice(m.index + m[0].length).trim();
     heardEl.textContent = rest || "…";
     if (final){
@@ -409,9 +458,12 @@ function buildRec(){
   };
   rec.onerror = e => {
     if (e.error === "no-speech" || e.error === "aborted") return;
+    recBlocked = true;
     if (e.error === "not-allowed" || e.error === "service-not-allowed"){
       wakeBox.checked = false;
       setStatus("Microphone access was blocked. Allow it in the address bar, or type instead.", true);
+    } else if (e.error === "audio-capture"){
+      setStatus("No microphone was found, or another app is using it.", true);
     } else if (e.error === "network"){
       offerLocal();
     } else if (e.error === "language-not-supported" && useLocal){
@@ -427,9 +479,9 @@ function buildRec(){
     if (!wakeOn()){
       const f = pttFinal.trim(); pttFinal = "";
       if (f) handle(f);
-      else if (state === "listening"){ setState("idle"); replyEl.textContent = "I didn't catch that."; setStatus("Tap Talk or press Space."); }
+      else if (state === "listening"){ setState("idle"); replyEl.textContent = "I didn't catch that."; setStatus(idleHint()); }
     } else if (state !== "thinking" && state !== "speaking"){
-      setTimeout(() => { if (wakeOn() && !recOn && state !== "speaking" && state !== "thinking") startRec(); }, 250);
+      if (!recBlocked) setTimeout(() => { if (wakeOn() && !recOn && !recBlocked && state !== "speaking" && state !== "thinking") startRec(); }, 250);
     }
     updateUI();
   };
@@ -439,13 +491,6 @@ function buildRec(){
 let useLocal = false;
 const recLang = () => navigator.language || "en-US";
 const localBtn = $("localBtn");
-async function checkLocal(){
-  if (!SR || typeof SR.available !== "function") return;
-  try {
-    const r = await SR.available({langs:[recLang()], processLocally:true});
-    if (r === "available") useLocal = true;
-  } catch(e){}
-}
 async function offerLocal(){
   if (state === "listening") setState("idle");
   let r = "unavailable";
@@ -482,12 +527,16 @@ function startRec(){
   try { rec.start(); } catch(e){}
 }
 function stopRec(){
+  pttFinal = "";
   if (rec && recOn){ try { rec.abort(); } catch(e){} }
   recOn = false;
 }
 
 function pushToTalk(){
   if (state === "speaking"){ if (synth) synth.cancel(); return; }
+  if (state === "thinking") return;
+  recBlocked = false;
+  if (settings.haptics && navigator.vibrate) { try { navigator.vibrate(15); } catch(e){} }
   if (wakeOn()){
     // In wake mode the button skips the wake word.
     awaiting = true; setState("listening"); setStatus("Listening…");
@@ -505,6 +554,8 @@ function pushToTalk(){
 }
 
 talkBtn.addEventListener("click", pushToTalk);
+let lastDrawerClose = 0;
+$("stage").addEventListener("click", () => { if (performance.now() - lastDrawerClose > 400 && !talkBtn.disabled) pushToTalk(); });
 document.addEventListener("keydown", e => {
   if (e.code !== "Space" || e.repeat) return;
   const tag = (document.activeElement && document.activeElement.tagName) || "";
@@ -514,8 +565,9 @@ document.addEventListener("keydown", e => {
 wakeBox.addEventListener("change", () => {
   save("vesta.wake", wakeBox.checked);
   stopRec();
+  recBlocked = false;
   if (wakeOn()){ setStatus("Say “Vesta,” then your question."); setTimeout(startRec, 200); }
-  else { awaiting = false; if (state === "listening") setState("idle"); setStatus("Tap Talk or press Space."); }
+  else { awaiting = false; if (state === "listening") setState("idle"); setStatus(idleHint()); }
 });
 $("typeForm").addEventListener("submit", e => {
   e.preventDefault();
@@ -534,6 +586,9 @@ function updateUI(){
 const drawer = $("drawer");
 $("openSettings").addEventListener("click", () => drawer.classList.add("open"));
 $("closeSettings").addEventListener("click", () => drawer.classList.remove("open"));
+document.addEventListener("pointerdown", e => {
+  if (drawer.classList.contains("open") && !drawer.contains(e.target) && !$("openSettings").contains(e.target)){ drawer.classList.remove("open"); lastDrawerClose = performance.now(); }
+});
 document.addEventListener("keydown", e => { if (e.key === "Escape") drawer.classList.remove("open"); });
 
 const rateEl = $("rate"), pitchEl = $("pitch");
@@ -546,6 +601,8 @@ syncSliders();
 rateEl.addEventListener("input", () => { settings.rate = +rateEl.value; syncSliders(); save("vesta.settings", settings); });
 pitchEl.addEventListener("input", () => { settings.pitch = +pitchEl.value; syncSliders(); save("vesta.settings", settings); });
 $("voiceSel").addEventListener("change", e => { settings.voice = e.target.value; save("vesta.settings", settings); });
+$("accentSel").value = settings.accent || "auto";
+$("accentSel").addEventListener("change", e => { settings.accent = e.target.value; save("vesta.settings", settings); });
 $("testVoice").addEventListener("click", () => speak("This is how I sound. Adjust me until I feel right.", () => setState("idle")));
 
 function renderLines(){
@@ -562,14 +619,17 @@ function renderLines(){
     li.append(span, b); ul.appendChild(li);
   });
 }
-$("addLine").addEventListener("click", () => {
+function addLine(){
   const tr = $("tTrigger").value.trim(), rp = $("tReply").value.trim();
-  if (!tr || !rp) return;
+  if (!tr || !rp){ (tr ? $("tReply") : $("tTrigger")).focus(); return; }
+  customLines = customLines.filter(c => c.trigger.toLowerCase() !== tr.toLowerCase());
   customLines.unshift({trigger:tr, reply:rp});
   save("vesta.lines", customLines);
   $("tTrigger").value = ""; $("tReply").value = "";
   renderLines();
-});
+}
+$("addLine").addEventListener("click", addLine);
+for (const id of ["tTrigger","tReply"]) $(id).addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); addLine(); } });
 renderLines();
 
 /* Phones only allow speech after a tap; prime the voice on the first touch. */
@@ -588,7 +648,56 @@ if (!SR){
     : "Voice input needs Chrome, Edge, or Safari. You can still type, and Vesta will answer aloud.", true);
 } else if (wakeOn()){
   setStatus("Wake word is on. Tap Talk once to grant the microphone.");
+} else setStatus(idleHint());
+
+/* ---------- phone options ---------- */
+let wakeLock = null;
+async function applyWakeLock(){
+  if (!("wakeLock" in navigator)) return;
+  try {
+    if (settings.keepAwake && document.visibilityState === "visible" && !wakeLock){
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } else if (!settings.keepAwake && wakeLock){ await wakeLock.release(); wakeLock = null; }
+  } catch(e){ wakeLock = null; }
 }
+const keepBox = $("keepAwake"), hapBox = $("haptics");
+keepBox.checked = !!settings.keepAwake; hapBox.checked = !!settings.haptics;
+if (!("wakeLock" in navigator)) keepBox.closest("label").hidden = true;
+if (!navigator.vibrate) hapBox.closest("label").hidden = true;
+keepBox.addEventListener("change", () => { settings.keepAwake = keepBox.checked; save("vesta.settings", settings); applyWakeLock(); });
+hapBox.addEventListener("change", () => { settings.haptics = hapBox.checked; save("vesta.settings", settings); });
+applyWakeLock();
+
+/* Pause the mic when the app goes to the background; resume wake-word listening on return */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden"){
+    stopRec();
+    if (synth && state === "speaking") synth.cancel();
+  } else {
+    applyWakeLock();
+    if (wakeOn()){ recBlocked = false; setTimeout(() => { if (!recOn && state !== "speaking" && state !== "thinking") startRec(); }, 300); }
+  }
+});
+
+/* Reset (two-step so it can't be hit by accident) */
+let resetArmed = false;
+$("resetBtn").addEventListener("click", () => {
+  if (!resetArmed){ resetArmed = true; $("resetBtn").textContent = "Tap again to reset"; setTimeout(() => { resetArmed = false; $("resetBtn").textContent = "Reset all settings"; }, 4000); return; }
+  save("vesta.settings", DEFAULTS); save("vesta.wake", false);
+  $("resetBtn").textContent = "Settings reset. Reloading…";
+  setTimeout(() => location.reload(), 700);
+});
+let forgetArmed = false;
+$("resetAll").addEventListener("click", () => {
+  const b = $("resetAll");
+  if (!forgetArmed){ forgetArmed = true; b.textContent = "Tap again to forget"; setTimeout(() => { forgetArmed = false; b.textContent = "Forget taught lines and my name"; }, 4000); return; }
+  customLines = []; userName = "";
+  save("vesta.lines", []); save("vesta.name", "");
+  renderLines(); forgetArmed = false;
+  b.textContent = "Forgotten";
+  setTimeout(() => { b.textContent = "Forget taught lines and my name"; }, 2000);
+});
 
 /* ---------- telemetry ---------- */
 function tick(){
@@ -733,7 +842,10 @@ function frame(now){
     document.documentElement.style.setProperty("--ember", hex(E.uiB));
   }
 
-  if (state === "speaking") levelTarget = 0.45 + 0.35*noise(t*6);
+  if (state === "speaking"){
+    levelTarget = 0.45 + 0.35*noise(t*6);
+    if (now - lastBoundary > 700 && now - lastRipple > 380 + 160*Math.sin(t*2.1)){ ripples.push({r:0, a:0.8}); lastRipple = now; }
+  }
   level += (levelTarget - level) * (1 - Math.exp(-dt*10));
   const tg = targets(), k = 1 - Math.exp(-dt*5);
   for (const key in tg) P[key] += (tg[key] - P[key]) * k;
