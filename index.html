@@ -90,7 +90,8 @@ form.type input::placeholder{color:var(--dim)}
 .lines button{background:none;border:none;color:var(--dim);cursor:pointer;padding:0 4px}
 .note{font-size:12px;color:var(--dim);margin:0}
 .empty{font-size:13px;color:var(--dim);margin:0}
-.closebtn{justify-self:end;position:sticky;top:0;z-index:1;background:var(--panel)}
+.drawerbar{position:sticky;top:calc(-20px - env(safe-area-inset-top,0px));z-index:2;display:flex;align-items:center;justify-content:space-between;background:var(--panel);margin:calc(-20px - env(safe-area-inset-top,0px)) -20px 0;padding:calc(12px + env(safe-area-inset-top,0px)) 20px 12px;border-bottom:1px solid var(--line)}
+.drawertitle{font-family:var(--f-display);font-size:11px;letter-spacing:.28em;color:var(--dim)}
 .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:8px}
 .swatch{display:grid;justify-items:center;gap:6px;padding:8px 4px;background:var(--hull);border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:11px;letter-spacing:.04em;color:var(--dim)}
 .swatch:hover{border-color:var(--dim);color:var(--ink)}
@@ -151,7 +152,7 @@ form.type input::placeholder{color:var(--dim)}
 </div>
 
 <aside class="drawer" id="drawer" aria-label="Settings">
-  <button class="iconbtn closebtn" id="closeSettings" aria-label="Close settings">✕</button>
+  <div class="drawerbar"><span class="drawertitle">SETTINGS</span><button class="iconbtn" id="closeSettings" aria-label="Close settings">✕</button></div>
   <section>
     <h2>BRAIN</h2>
     <label>Replies come from<select id="brainSel">
@@ -200,6 +201,7 @@ form.type input::placeholder{color:var(--dim)}
       <label>Speaker effect<select id="fxSel">
         <option value="off">None</option>
         <option value="room">Subtle room</option>
+        <option value="soft">Soft and close</option>
         <option value="cabin">Cabin speaker</option>
       </select></label>
       <label class="check"><input type="checkbox" id="kGpu"> Use the GPU: faster replies, about 330 MB download</label>
@@ -219,12 +221,13 @@ form.type input::placeholder{color:var(--dim)}
     <label>Pitch <span id="pitchVal"></span><input type="range" id="pitch" min="0.3" max="1.4" step="0.05"></label>
     </div>
     <label>Speed <span id="rateVal"></span><input type="range" id="rate" min="0.6" max="1.3" step="0.05"></label>
-    <label class="check"><input type="checkbox" id="calmBox"> Calm delivery: even, unhurried sentences with short pauses</label>
+    <label class="check"><input type="checkbox" id="calmBox"> Calm delivery: gentle, unhurried replies</label>
+    <label class="check"><input type="checkbox" id="flatBox"> Level intonation: no rise on questions or exclamations</label>
     <div class="btnrow">
       <button class="ghost" id="testVoice">Test voice</button>
-      <button class="ghost" id="calmPreset">Use the calm British preset</button>
+      <button class="ghost" id="calmPreset">Use the soft British preset</button>
     </div>
-    <p class="note">Voices come from your system. On Android, Chrome picks the voice by accent: set Accent here, and choose which British or American voice it uses in your phone's text-to-speech settings. On Windows, the “Microsoft” and “Google UK English” voices sound the most composed.</p>
+    <p class="note" id="sysVoiceNote">Voices come from your system. On Android, Chrome picks the voice by accent: set Accent here, and choose which British or American voice it uses in your phone's text-to-speech settings. On Windows, the “Microsoft” and “Google UK English” voices sound the most composed.</p>
   </section>
   <section>
     <h2>TEACH VESTA</h2>
@@ -263,7 +266,7 @@ const $ = id => document.getElementById(id);
 const heardEl = $("heard"), replyEl = $("reply"), statusEl = $("status");
 const talkBtn = $("talk"), talkLabel = $("talkLabel"), wakeBox = $("wake");
 
-const DEFAULTS = {voice:"", rate:0.95, pitch:1, accent:"auto", engine:"system", kVoice:"bf_emma", kGpu:false, kPitch:1, fx:"off", calm:false, brain:"scripted", gModel:"", gPersona:"", eye:"red", mood:false, replyMood:true, keepAwake:false, haptics:true};
+const DEFAULTS = {voice:"", rate:0.95, pitch:1, accent:"auto", engine:"system", kVoice:"bf_emma", kGpu:false, kPitch:1, fx:"off", calm:false, flat:false, brain:"scripted", gModel:"", gPersona:"", eye:"red", mood:false, replyMood:true, keepAwake:false, haptics:true};
 let settings = Object.assign({}, DEFAULTS, load("vesta.settings", {}));
 settings.moods = Object.assign({listening:"ice", thinking:"nebula", speaking:"same", resting:"cobalt"}, settings.moods || {});
 let customLines = load("vesta.lines", []);
@@ -449,6 +452,8 @@ function loadKokoro(){
         setKStatus(msg); if (state === "thinking") setStatus(msg);
       }
     });
+    setKStatus("Warming up the voice…");
+    try { await tts.generate("Ready.", { voice: settings.kVoice || "bf_emma", speed: 1 }); } catch(e){}
     kokoro = tts;
     setKStatus(gpu ? "Natural voice ready (using the GPU)." : "Natural voice ready.");
     $("kLoad").hidden = true;
@@ -483,6 +488,20 @@ function fxInput(ctx){
     input.connect(ctx.destination);
   } else {
     let tail = input;
+    if (key === "soft"){
+      // Round off brightness and even out loudness so she sounds quiet and close
+      const ls = ctx.createBiquadFilter(); ls.type = "lowshelf"; ls.frequency.value = 220; ls.gain.value = 1;
+      const hs = ctx.createBiquadFilter(); hs.type = "highshelf"; hs.frequency.value = 4000; hs.gain.value = -4.5;
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 7500; lp.Q.value = 0.5;
+      const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -30; comp.knee.value = 12; comp.ratio.value = 4; comp.attack.value = 0.01; comp.release.value = 0.3;
+      const makeup = ctx.createGain(); makeup.gain.value = 1.6;
+      input.connect(ls); ls.connect(hs); hs.connect(lp); lp.connect(comp); comp.connect(makeup); tail = makeup;
+    }
+    if (key === "room"){
+      const shelf = ctx.createBiquadFilter(); shelf.type = "highshelf"; shelf.frequency.value = 5000; shelf.gain.value = -2.5;
+      const warm = ctx.createBiquadFilter(); warm.type = "lowshelf"; warm.frequency.value = 250; warm.gain.value = 1.5;
+      input.connect(warm); warm.connect(shelf); tail = shelf;
+    }
     if (key === "cabin"){
       const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 170;
       const pk = ctx.createBiquadFilter(); pk.type = "peaking"; pk.frequency.value = 2600; pk.Q.value = 0.9; pk.gain.value = 3;
@@ -491,8 +510,8 @@ function fxInput(ctx){
       input.connect(hp); hp.connect(pk); pk.connect(lp); lp.connect(comp); tail = comp;
     }
     const dry = ctx.createGain(); dry.gain.value = key === "cabin" ? 0.9 : 0.95;
-    const wet = ctx.createGain(); wet.gain.value = key === "cabin" ? 0.22 : 0.12;
-    const conv = ctx.createConvolver(); conv.buffer = roomImpulse(ctx, key === "cabin" ? 0.9 : 0.6, key === "cabin" ? 3.2 : 4);
+    const wet = ctx.createGain(); wet.gain.value = key === "cabin" ? 0.22 : key === "soft" ? 0.07 : 0.12;
+    const conv = ctx.createConvolver(); conv.buffer = roomImpulse(ctx, key === "cabin" ? 0.9 : key === "soft" ? 0.45 : 0.6, key === "cabin" ? 3.2 : 4.5);
     tail.connect(dry); dry.connect(ctx.destination);
     tail.connect(conv); conv.connect(wet); wet.connect(ctx.destination);
   }
@@ -515,23 +534,49 @@ function playRaw(raw, isLive){
     src.start();
   });
 }
+/* The whole reply is generated first, then joined into one continuous recording, so she never
+   stalls between sentences. Pieces stay under ~320 characters, which the model handles well. */
+function chunkText(text){
+  const sents = (text.match(/[^.!?]+[.!?]+["”’)]*\s*|[^.!?]+$/g) || [text]).map(x => x.trim()).filter(Boolean);
+  const chunks = []; let cur = "";
+  for (const sen of sents){
+    if (cur && (cur + " " + sen).length > 320){ chunks.push(cur); cur = sen; }
+    else cur = cur ? cur + " " + sen : sen;
+  }
+  if (cur) chunks.push(cur);
+  return chunks.length ? chunks : [text];
+}
+function trimSilence(a, sr){
+  const th = 0.004, pad = Math.floor(sr * 0.03);
+  let st = 0, en = a.length - 1;
+  while (st < en && Math.abs(a[st]) < th) st++;
+  while (en > st && Math.abs(a[en]) < th) en--;
+  return a.subarray(Math.max(0, st - pad), Math.min(a.length, en + pad));
+}
+function joinAudio(raws, gapSec){
+  const sr = raws[0].sampling_rate;
+  const parts = raws.map(r => trimSilence(r.audio instanceof Float32Array ? r.audio : Float32Array.from(r.audio), sr));
+  const gap = Math.floor(sr * gapSec);
+  const out = new Float32Array(parts.reduce((n, x) => n + x.length, 0) + gap * (parts.length - 1));
+  let o = 0;
+  parts.forEach((x, i) => { out.set(x, o); o += x.length + (i < parts.length - 1 ? gap : 0); });
+  return { audio: out, sampling_rate: sr };
+}
 async function speakKokoro(text, isLive, finish, fallback){
   try {
     if (!kokoro){ setState("thinking"); setStatus(kokoroLoading ? "Preparing the natural voice…" : "Loading the natural voice…"); }
     const tts = await loadKokoro();
     if (!isLive()) return;
-    const parts = (text.match(/[^.!?]+[.!?]+["”’)]*\s*|[^.!?]+$/g) || [text]).map(x => x.trim()).filter(Boolean);
+    if (state !== "thinking") setState("thinking");
     const opts = { voice: settings.kVoice || "bf_emma", speed: kSpeedNow() };
-    let next = tts.generate(parts[0], opts);
-    for (let i = 0; i < parts.length; i++){
-      const raw = await next;
+    const raws = [];
+    for (const part of chunkText(text)){
+      raws.push(await tts.generate(part, opts));
       if (!isLive()) return;
-      if (i + 1 < parts.length) next = tts.generate(parts[i + 1], opts);
-      if (state !== "speaking") setState("speaking");
-      await playRaw(raw, isLive);
-      if (!isLive()) return;
-      if (settings.calm && i + 1 < parts.length){ await new Promise(r => setTimeout(r, 320)); if (!isLive()) return; }
     }
+    setState("speaking");
+    await playRaw(joinAudio(raws, settings.calm ? 0.16 : 0.09), isLive);
+    if (!isLive()) return;
     finish();
   } catch(e){
     if (isLive()) fallback();
@@ -564,6 +609,12 @@ function stopAudio(){
   if (currentSource){ try { currentSource.stop(); } catch(e){} currentSource = null; currentAnalyser = null; }
 }
 function stopSpeaking(){ if (activeStop) activeStop(); }
+/* Speech engines lift their pitch on ? and ! and lean on dashes; level these out for a flatter read */
+function flatten(t){
+  return t.replace(/\s*[—–]\s*/g, ", ").replace(/[;:]\s*/g, ", ").replace(/[()]/g, "")
+          .replace(/(\.\.\.|…)\s*(?=[a-z])/g, ", ").replace(/(\.\.\.|…)/g, ".").replace(/[?!]+/g, ".")
+          .replace(/\.{2,}/g, ".").replace(/,\s*\./g, ".").replace(/,\s*$/, ".").replace(/\s+/g, " ").trim();
+}
 function speak(text, onDone){
   if (settings.calm) text = text.replace(/!+/g, ".").replace(/\.{2,}/g, ".");
   replyEl.textContent = text;
@@ -582,8 +633,9 @@ function speak(text, onDone){
   };
   const stop = () => { cancelled = true; if (synth) synth.cancel(); stopAudio(); done = false; finish(); };
   activeStop = stop;
-  if (settings.engine === "kokoro" && AC) speakKokoro(text, isLive, finish, () => speakSystem(text, myId, finish));
-  else speakSystem(text, myId, finish);
+  const said = settings.flat ? flatten(text) : text;
+  if (settings.engine === "kokoro" && AC) speakKokoro(said, isLive, finish, () => speakSystem(said, myId, finish));
+  else speakSystem(said, myId, finish);
 }
 
 /* ---------- brain: Gemini ---------- */
@@ -604,7 +656,8 @@ function systemPrompt(){
     "Your replies are read aloud by a speech engine, so write plain spoken sentences: no lists, headings, markdown, emoji or stage directions.",
     "Keep replies to one to three short sentences unless the person asks for more detail.",
     "You cannot see live information such as weather, news or prices. If asked, say so briefly instead of guessing.",
-    settings.calm ? "Speak in a calm, even, unhurried way: short, complete sentences, no exclamation marks, no gushing or excitement. Warmth comes through your words, not your volume." : "",
+    settings.flat ? "Keep your phrasing understated and level. Prefer plain statements to questions, and avoid emphasis words, rhetorical flourishes and dramatic pauses." : "",
+    settings.calm ? "Speak gently and warmly, at an unhurried pace, like someone keeping a quiet night watch. Use complete, natural sentences of varied length. No exclamation marks, no excitement or exaggeration, but never curt or cold." : "",
     "Begin every reply with exactly one tone tag in square brackets, chosen from [neutral], [warm], [cheerful], [calm], [thoughtful], [playful], [serious], then the reply itself."
   ].filter(Boolean).join("\n");
 }
@@ -950,6 +1003,7 @@ function syncSliders(){
   $("pitchVal").textContent = Number(settings.pitch).toFixed(2);
   $("kPitch").value = kPitchNow(); $("kPitchVal").textContent = kPitchNow().toFixed(2);
   $("calmBox").checked = !!settings.calm;
+  $("flatBox").checked = !!settings.flat;
   $("fxSel").value = settings.fx || "off";
 }
 syncSliders();
@@ -957,6 +1011,7 @@ rateEl.addEventListener("input", () => { settings.rate = +rateEl.value; syncSlid
 $("kPitch").addEventListener("input", e => { settings.kPitch = +e.target.value; syncSliders(); save("vesta.settings", settings); });
 $("fxSel").addEventListener("change", e => { settings.fx = e.target.value; save("vesta.settings", settings); });
 $("calmBox").addEventListener("change", e => { settings.calm = e.target.checked; save("vesta.settings", settings); });
+$("flatBox").addEventListener("change", e => { settings.flat = e.target.checked; save("vesta.settings", settings); });
 pitchEl.addEventListener("input", () => { settings.pitch = +pitchEl.value; syncSliders(); save("vesta.settings", settings); });
 $("voiceSel").addEventListener("change", e => { settings.voice = e.target.value; save("vesta.settings", settings); });
 $("accentSel").value = settings.accent || "auto";
@@ -1062,6 +1117,7 @@ function syncEngineUI(){
   kGpuBox.checked = !!settings.kGpu;
   $("kokoroRows").hidden = settings.engine !== "kokoro";
   $("systemRows").hidden = settings.engine === "kokoro";
+  $("sysVoiceNote").hidden = settings.engine === "kokoro";
   if (!AC) engineSel.querySelector('[value="kokoro"]').disabled = true;
   if (!navigator.gpu) kGpuBox.closest("label").hidden = true;
   $("kLoad").textContent = settings.kGpu ? "Download natural voice (about 330 MB)" : "Download natural voice (about 100 MB)";
@@ -1069,11 +1125,11 @@ function syncEngineUI(){
 syncEngineUI();
 engineSel.addEventListener("change", () => { settings.engine = engineSel.value; save("vesta.settings", settings); syncEngineUI(); });
 $("calmPreset").addEventListener("click", () => {
-  Object.assign(settings, { engine: AC ? "kokoro" : "system", kVoice:"bf_emma", rate:0.88, kPitch:0.93, fx:"room", calm:true, accent:"en-GB", pitch:0.95 });
+  Object.assign(settings, { engine: AC ? "kokoro" : "system", kVoice:"bf_emma", rate:0.9, kPitch:0.98, fx:"soft", calm:true, flat:true, accent:"en-GB", pitch:1 });
   save("vesta.settings", settings); syncEngineUI(); syncSliders();
   ensureAudio();
   if (settings.engine === "kokoro"){
-    setKStatus(kokoro ? "Calm British preset applied." : "Calm British preset applied. Downloading the natural voice (about 100 MB)…");
+    setKStatus(kokoro ? "Soft British preset applied." : "Soft British preset applied. Downloading the natural voice (about 100 MB)…");
     loadKokoro().then(() => speak("All systems are steady. I'm listening whenever you need me.", () => setState("idle"))).catch(() => {});
   } else {
     speak("All systems are steady. I'm listening whenever you need me.", () => setState("idle"));
