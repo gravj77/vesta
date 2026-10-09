@@ -166,6 +166,7 @@ form.type input::placeholder{color:var(--dim)}
       </div>
       <button class="ghost" id="gCheck">Check key and load models</button>
       <label>Model<select id="gModel"></select></label>
+      <button class="ghost" id="gTest">Test this model</button>
       <label>Personality<textarea id="gPersona" rows="6"></textarea></label>
       <div class="btnrow">
         <button class="ghost" id="gPersonaReset">Restore default personality</button>
@@ -195,6 +196,12 @@ form.type input::placeholder{color:var(--dim)}
     </select></label>
     <div class="moodrows" id="kokoroRows">
       <label>Natural voice<select id="kVoiceSel"></select></label>
+      <label>Voice pitch <span id="kPitchVal"></span><input type="range" id="kPitch" min="0.8" max="1.1" step="0.01"></label>
+      <label>Speaker effect<select id="fxSel">
+        <option value="off">None</option>
+        <option value="room">Subtle room</option>
+        <option value="cabin">Cabin speaker</option>
+      </select></label>
       <label class="check"><input type="checkbox" id="kGpu"> Use the GPU: faster replies, about 330 MB download</label>
       <button class="ghost" id="kLoad">Download natural voice (about 100 MB)</button>
       <p class="note" id="kStatus">Downloads once, then works offline. On a phone each reply takes a second or two to generate before she speaks.</p>
@@ -212,7 +219,11 @@ form.type input::placeholder{color:var(--dim)}
     <label>Pitch <span id="pitchVal"></span><input type="range" id="pitch" min="0.3" max="1.4" step="0.05"></label>
     </div>
     <label>Speed <span id="rateVal"></span><input type="range" id="rate" min="0.6" max="1.3" step="0.05"></label>
-    <button class="ghost" id="testVoice">Test voice</button>
+    <label class="check"><input type="checkbox" id="calmBox"> Calm delivery: even, unhurried sentences with short pauses</label>
+    <div class="btnrow">
+      <button class="ghost" id="testVoice">Test voice</button>
+      <button class="ghost" id="calmPreset">Use the calm British preset</button>
+    </div>
     <p class="note">Voices come from your system. On Android, Chrome picks the voice by accent: set Accent here, and choose which British or American voice it uses in your phone's text-to-speech settings. On Windows, the “Microsoft” and “Google UK English” voices sound the most composed.</p>
   </section>
   <section>
@@ -252,7 +263,7 @@ const $ = id => document.getElementById(id);
 const heardEl = $("heard"), replyEl = $("reply"), statusEl = $("status");
 const talkBtn = $("talk"), talkLabel = $("talkLabel"), wakeBox = $("wake");
 
-const DEFAULTS = {voice:"", rate:0.95, pitch:1, accent:"auto", engine:"system", kVoice:"bf_emma", kGpu:false, brain:"scripted", gModel:"", gPersona:"", eye:"red", mood:false, replyMood:true, keepAwake:false, haptics:true};
+const DEFAULTS = {voice:"", rate:0.95, pitch:1, accent:"auto", engine:"system", kVoice:"bf_emma", kGpu:false, kPitch:1, fx:"off", calm:false, brain:"scripted", gModel:"", gPersona:"", eye:"red", mood:false, replyMood:true, keepAwake:false, haptics:true};
 let settings = Object.assign({}, DEFAULTS, load("vesta.settings", {}));
 settings.moods = Object.assign({listening:"ice", thinking:"nebula", speaking:"same", resting:"cobalt"}, settings.moods || {});
 let customLines = load("vesta.lines", []);
@@ -449,6 +460,45 @@ function loadKokoro(){
   });
   return kokoroLoading;
 }
+/* Pitch: play slightly slower (lower) and have the model speak slightly faster to keep the same pace */
+const kPitchNow = () => Math.min(1.1, Math.max(0.8, +settings.kPitch || 1));
+const kSpeedNow = () => Math.min(2, Math.max(0.5, settings.rate / kPitchNow()));
+
+/* Speaker effects, built from Web Audio filters and a generated room impulse */
+let fxNodes = { key:"", input:null };
+function roomImpulse(ctx, seconds, decay){
+  const len = Math.floor(ctx.sampleRate * seconds), b = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++){
+    const d = b.getChannelData(ch);
+    for (let i = 0; i < len; i++) d[i] = (Math.random()*2 - 1) * Math.pow(1 - i/len, decay) * 0.5;
+  }
+  return b;
+}
+function fxInput(ctx){
+  const key = settings.fx || "off";
+  if (fxNodes.input && fxNodes.key === key && fxNodes.input.context === ctx) return fxNodes.input;
+  if (fxNodes.input){ try { fxNodes.input.disconnect(); } catch(e){} }
+  const input = ctx.createGain();
+  if (key === "off"){
+    input.connect(ctx.destination);
+  } else {
+    let tail = input;
+    if (key === "cabin"){
+      const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 170;
+      const pk = ctx.createBiquadFilter(); pk.type = "peaking"; pk.frequency.value = 2600; pk.Q.value = 0.9; pk.gain.value = 3;
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 6800;
+      const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -22; comp.ratio.value = 3;
+      input.connect(hp); hp.connect(pk); pk.connect(lp); lp.connect(comp); tail = comp;
+    }
+    const dry = ctx.createGain(); dry.gain.value = key === "cabin" ? 0.9 : 0.95;
+    const wet = ctx.createGain(); wet.gain.value = key === "cabin" ? 0.22 : 0.12;
+    const conv = ctx.createConvolver(); conv.buffer = roomImpulse(ctx, key === "cabin" ? 0.9 : 0.6, key === "cabin" ? 3.2 : 4);
+    tail.connect(dry); dry.connect(ctx.destination);
+    tail.connect(conv); conv.connect(wet); wet.connect(ctx.destination);
+  }
+  fxNodes = { key, input };
+  return input;
+}
 function playRaw(raw, isLive){
   return new Promise(resolve => {
     const ctx = ensureAudio();
@@ -457,8 +507,9 @@ function playRaw(raw, isLive){
     const buf = ctx.createBuffer(1, data.length, raw.sampling_rate);
     buf.copyToChannel(data, 0);
     const src = ctx.createBufferSource(); src.buffer = buf;
+    src.playbackRate.value = kPitchNow();
     const an = ctx.createAnalyser(); an.fftSize = 512;
-    src.connect(an); an.connect(ctx.destination);
+    src.connect(an); an.connect(fxInput(ctx));
     currentSource = src; currentAnalyser = an;
     src.onended = () => { if (currentSource === src){ currentSource = null; currentAnalyser = null; } resolve(); };
     src.start();
@@ -470,7 +521,7 @@ async function speakKokoro(text, isLive, finish, fallback){
     const tts = await loadKokoro();
     if (!isLive()) return;
     const parts = (text.match(/[^.!?]+[.!?]+["”’)]*\s*|[^.!?]+$/g) || [text]).map(x => x.trim()).filter(Boolean);
-    const opts = { voice: settings.kVoice || "bf_emma", speed: settings.rate };
+    const opts = { voice: settings.kVoice || "bf_emma", speed: kSpeedNow() };
     let next = tts.generate(parts[0], opts);
     for (let i = 0; i < parts.length; i++){
       const raw = await next;
@@ -479,6 +530,7 @@ async function speakKokoro(text, isLive, finish, fallback){
       if (state !== "speaking") setState("speaking");
       await playRaw(raw, isLive);
       if (!isLive()) return;
+      if (settings.calm && i + 1 < parts.length){ await new Promise(r => setTimeout(r, 320)); if (!isLive()) return; }
     }
     finish();
   } catch(e){
@@ -513,6 +565,7 @@ function stopAudio(){
 }
 function stopSpeaking(){ if (activeStop) activeStop(); }
 function speak(text, onDone){
+  if (settings.calm) text = text.replace(/!+/g, ".").replace(/\.{2,}/g, ".");
   replyEl.textContent = text;
   clearTimeout(speakTimer);
   stopAudio();
@@ -551,10 +604,12 @@ function systemPrompt(){
     "Your replies are read aloud by a speech engine, so write plain spoken sentences: no lists, headings, markdown, emoji or stage directions.",
     "Keep replies to one to three short sentences unless the person asks for more detail.",
     "You cannot see live information such as weather, news or prices. If asked, say so briefly instead of guessing.",
+    settings.calm ? "Speak in a calm, even, unhurried way: short, complete sentences, no exclamation marks, no gushing or excitement. Warmth comes through your words, not your volume." : "",
     "Begin every reply with exactly one tone tag in square brackets, chosen from [neutral], [warm], [cheerful], [calm], [thoughtful], [playful], [serious], then the reply itself."
   ].filter(Boolean).join("\n");
 }
 function thinkingFor(model){
+  if (settings.noThink && settings.noThink[model]) return null;
   const m = model.match(/gemini-(\d+)(?:\.(\d+))?/);
   const major = m ? +m[1] : 0;
   if (major >= 3) return { thinkingLevel:"low" };
@@ -582,13 +637,15 @@ async function gemFetch(path, opts){
     throw e;
   } finally { clearTimeout(timer); }
 }
+let lastBrainErr = null, brainNote = "";
+const shorten = t => { t = String(t || "").replace(/\s+/g, " ").trim().replace(/\.+$/, ""); return t.length > 90 ? t.slice(0, 87) + "…" : t; };
 function brainError(e){
   const msg = (e && e.message) || "";
   if (e.status === 400 && /api key/i.test(msg)) return "Gemini rejected the API key. Check you copied all of it.";
   if (e.status === 403) return "Google refused the request (403). The key may be restricted, or the API is off for that project.";
   if (e.status === 404) return "That Gemini model isn't available. Pick another in Settings → Brain.";
   if (e.status === 429) return "Gemini's free-tier limit was reached. Try again shortly, or pick a lighter model. Using built-in lines meanwhile.";
-  if (e.status >= 500) return "Gemini is busy right now. Using built-in lines for this reply.";
+  if (e.status >= 500) return `Gemini kept failing (${e.status}: ${shorten(e.detail || msg)}). Using built-in lines. Try another model in Settings → Brain.`;
   if (e.status === 0) return "Couldn't reach Gemini. Check your connection. Using built-in lines meanwhile.";
   return "Gemini error: " + msg;
 }
@@ -609,13 +666,38 @@ async function askGemini(text){
   };
   const think = thinkingFor(model);
   if (think) body.generationConfig.thinkingConfig = think;
-  const post = b => gemFetch(model + ":generateContent", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(b) });
-  let data;
-  try { data = await post(body); }
-  catch(e){
-    if (e.status === 400 && think && /think/i.test(e.message)){ delete body.generationConfig.thinkingConfig; data = await post(body); }
-    else throw e;
+  const post = (m, b) => gemFetch(m + ":generateContent", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(b) });
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const busy = e => e.status >= 500 || e.status === 429;
+  const noThink = () => { const b = JSON.parse(JSON.stringify(body)); delete b.generationConfig.thinkingConfig; return b; };
+  // Try the chosen model; on a busy/odd error retry, then drop the thinking setting, then fall back to other models.
+  const backups = (settings.gModels && settings.gModels.length ? settings.gModels : ["models/gemini-2.5-flash", "models/gemini-2.5-flash-lite"])
+    .filter(m => m !== model).slice(0, 3);
+  let data = null, used = model, firstErr = null;
+  const attempts = [[model, body, 0], [model, body, 900]];
+  if (think) attempts.push([model, noThink(), 0]);
+  for (const m of backups){ const t = thinkingFor(m); const b = JSON.parse(JSON.stringify(body)); if (t) b.generationConfig.thinkingConfig = t; else delete b.generationConfig.thinkingConfig; attempts.push([m, b, 0]); }
+  const remember = (m, b, sentThink) => {
+    if (sentThink && !b.generationConfig.thinkingConfig){
+      settings.noThink = Object.assign({}, settings.noThink, { [m]: true }); save("vesta.settings", settings);
+    }
+  };
+  for (const [m, b, delay] of attempts){
+    if (delay) await wait(delay);
+    const sentThink = !!thinkingFor(m);
+    try { data = await post(m, b); used = m; remember(m, b, sentThink && m === model); break; }
+    catch(e){
+      if (!firstErr) firstErr = e;
+      lastBrainErr = e;
+      const thinkRejected = e.status === 400 && /think/i.test(e.message);
+      if (thinkRejected && b.generationConfig.thinkingConfig){
+        try { const nb = JSON.parse(JSON.stringify(b)); delete nb.generationConfig.thinkingConfig; data = await post(m, nb); used = m; remember(m, nb, true); break; } catch(e2){ lastBrainErr = e2; if (!busy(e2)) throw e2; continue; }
+      }
+      if (!busy(e) && !thinkRejected) throw e;   // bad key, blocked, etc.: no point retrying
+    }
   }
+  if (!data){ const e = firstErr || new Error("No reply"); e.detail = lastBrainErr && lastBrainErr.message; throw e; }
+  if (used !== model) brainNote = `${model.replace("models/", "")} was busy, so ${used.replace("models/", "")} answered. You can switch models in Settings → Brain.`;
   const cand = data.candidates && data.candidates[0];
   const raw = cand && cand.content && cand.content.parts
     ? cand.content.parts.filter(p => p.text && !p.thought).map(p => p.text).join("").trim() : "";
@@ -646,7 +728,8 @@ async function handle(text){
   let r = respond(said, true), fromBrain = false, keepStatus = false;
   if (!r && brainOn()){
     pendingAsk = true; updateUI();
-    try { r = await askGemini(said); fromBrain = true; }
+    brainNote = "";
+    try { r = await askGemini(said); fromBrain = true; if (brainNote){ setStatus(brainNote); keepStatus = true; } }
     catch(e){
       if (seq !== handleSeq) return;
       r = respond(said);
@@ -865,9 +948,15 @@ function syncSliders(){
   rateEl.value = settings.rate; pitchEl.value = settings.pitch;
   $("rateVal").textContent = Number(settings.rate).toFixed(2) + "×";
   $("pitchVal").textContent = Number(settings.pitch).toFixed(2);
+  $("kPitch").value = kPitchNow(); $("kPitchVal").textContent = kPitchNow().toFixed(2);
+  $("calmBox").checked = !!settings.calm;
+  $("fxSel").value = settings.fx || "off";
 }
 syncSliders();
 rateEl.addEventListener("input", () => { settings.rate = +rateEl.value; syncSliders(); save("vesta.settings", settings); });
+$("kPitch").addEventListener("input", e => { settings.kPitch = +e.target.value; syncSliders(); save("vesta.settings", settings); });
+$("fxSel").addEventListener("change", e => { settings.fx = e.target.value; save("vesta.settings", settings); });
+$("calmBox").addEventListener("change", e => { settings.calm = e.target.checked; save("vesta.settings", settings); });
 pitchEl.addEventListener("input", () => { settings.pitch = +pitchEl.value; syncSliders(); save("vesta.settings", settings); });
 $("voiceSel").addEventListener("change", e => { settings.voice = e.target.value; save("vesta.settings", settings); });
 $("accentSel").value = settings.accent || "auto";
@@ -921,11 +1010,43 @@ $("gCheck").addEventListener("click", async () => {
     }
     const best = chat.find(m => stable(m) && /flash/i.test(m.name) && !/lite/i.test(m.name)) || chat[0];
     const keep = chat.some(m => m.name === settings.gModel) ? settings.gModel : best.name;
-    gModelSel.value = keep; settings.gModel = keep; save("vesta.settings", settings);
+    gModelSel.value = keep; settings.gModel = keep;
+    settings.gModels = chat.filter(m => stable(m) && /flash/i.test(m.name)).map(m => m.name).concat(chat.filter(m => stable(m) && !/flash/i.test(m.name)).map(m => m.name));
+    save("vesta.settings", settings);
     setGStatus("Key works. Using " + gModelSel.selectedOptions[0].textContent + ". Flash models are fast and on the free tier.");
   } catch(e){ setGStatus(brainError(e), true); }
 });
 gModelSel.addEventListener("change", () => { settings.gModel = gModelSel.value; save("vesta.settings", settings); });
+$("gTest").addEventListener("click", async () => {
+  gKey = gKeyEl.value.trim(); save("vesta.gkey", gKey);
+  if (!gKey){ setGStatus("Paste your key first.", true); return; }
+  const model = gModelSel.value, name = gModelSel.selectedOptions[0] ? gModelSel.selectedOptions[0].textContent : model;
+  const base = { contents:[{ role:"user", parts:[{ text:"Reply with the single word: ready" }] }], generationConfig:{ maxOutputTokens: 256 } };
+  const tryOnce = async withThink => {
+    const b = JSON.parse(JSON.stringify(base));
+    const m = model.match(/gemini-(\d+)/); const major = m ? +m[1] : 0;
+    if (withThink) b.generationConfig.thinkingConfig = major >= 3 ? { thinkingLevel:"low" } : { thinkingBudget:0 };
+    const t0 = performance.now();
+    await gemFetch(model + ":generateContent", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(b) });
+    return Math.round(performance.now() - t0);
+  };
+  const desc = e => `${e.status || "no connection"}: ${shorten(e.message)}`;
+  setGStatus(`Testing ${name}…`);
+  let a, bRes;
+  try { a = { ok:true, ms: await tryOnce(true) }; } catch(e){ a = { ok:false, e }; }
+  try { bRes = { ok:true, ms: await tryOnce(false) }; } catch(e){ bRes = { ok:false, e }; }
+  if (a.ok && bRes.ok){
+    if (settings.noThink) { delete settings.noThink[model]; save("vesta.settings", settings); }
+    setGStatus(`${name} works (${a.ms} ms with the speed setting, ${bRes.ms} ms without).`);
+  } else if (!a.ok && bRes.ok){
+    settings.noThink = Object.assign({}, settings.noThink, { [model]: true }); save("vesta.settings", settings);
+    setGStatus(`${name} rejects the speed setting (${desc(a.e)}) but works without it (${bRes.ms} ms). Vesta will stop sending it to this model.`);
+  } else if (a.ok && !bRes.ok){
+    setGStatus(`${name} works (${a.ms} ms). A second test failed (${desc(bRes.e)}), so it may be intermittently busy.`);
+  } else {
+    setGStatus(`${name} failed both tests. With the speed setting: ${desc(a.e)}. Without: ${desc(bRes.e)}.`, true);
+  }
+});
 gPersonaEl.addEventListener("change", () => {
   const v = gPersonaEl.value.trim();
   settings.gPersona = (v && v !== DEFAULT_PERSONA) ? v : ""; save("vesta.settings", settings);
@@ -947,6 +1068,17 @@ function syncEngineUI(){
 }
 syncEngineUI();
 engineSel.addEventListener("change", () => { settings.engine = engineSel.value; save("vesta.settings", settings); syncEngineUI(); });
+$("calmPreset").addEventListener("click", () => {
+  Object.assign(settings, { engine: AC ? "kokoro" : "system", kVoice:"bf_emma", rate:0.88, kPitch:0.93, fx:"room", calm:true, accent:"en-GB", pitch:0.95 });
+  save("vesta.settings", settings); syncEngineUI(); syncSliders();
+  ensureAudio();
+  if (settings.engine === "kokoro"){
+    setKStatus(kokoro ? "Calm British preset applied." : "Calm British preset applied. Downloading the natural voice (about 100 MB)…");
+    loadKokoro().then(() => speak("All systems are steady. I'm listening whenever you need me.", () => setState("idle"))).catch(() => {});
+  } else {
+    speak("All systems are steady. I'm listening whenever you need me.", () => setState("idle"));
+  }
+});
 kVoiceSel.addEventListener("change", () => { settings.kVoice = kVoiceSel.value; save("vesta.settings", settings); });
 kGpuBox.addEventListener("change", () => {
   settings.kGpu = kGpuBox.checked; save("vesta.settings", settings);
