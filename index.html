@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Vesta Sentinel</title>
+<meta name="theme-color" content="#08070d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Vesta">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600&family=Michroma&display=swap">
+<style>
+/* Layout: one full-height console — telemetry strip on top, the eye fills the stage, captions under it, control deck at the bottom, settings drawer slides in from the right */
+:root{
+  --void:#08070d; --hull:#13111c; --panel:#1b1827; --line:#2e2a42;
+  --ink:#ece6f7; --dim:#958eae; --amber:#ffb347; --ember:#ff6a1a; --alert:#ff5c7a;
+  --f-display:"Michroma","Eurostile","Bank Gothic",system-ui,sans-serif;
+  --f-ui:"Chakra Petch","Segoe UI",system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--void);color:var(--ink);font:15px/1.5 var(--f-ui);overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+.app{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr) auto auto;
+  padding-inline:16px;padding-block:env(safe-area-inset-top,0px) env(safe-area-inset-bottom,0px)}
+
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-block:14px;border-bottom:1px solid var(--line)}
+.mark{font-family:var(--f-display);letter-spacing:.32em;font-size:15px;color:var(--amber)}
+.role{color:var(--dim);font-size:12px;letter-spacing:.14em;text-transform:uppercase}
+.telemetry{margin-left:auto;display:flex;gap:18px;flex-wrap:wrap;color:var(--dim);font-size:12px;letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.telemetry b{color:var(--ink);font-weight:500}
+.iconbtn{background:none;border:1px solid var(--line);border-radius:6px;width:36px;height:36px;display:grid;place-items:center;cursor:pointer;color:var(--dim)}
+.iconbtn:hover{color:var(--ink);border-color:var(--dim)}
+
+.stage{position:relative;min-height:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+.captions{text-align:center;padding-block:4px 10px;min-height:92px;display:grid;align-content:start;gap:4px}
+.heard{color:var(--dim);font-size:14px;min-height:21px;max-width:60ch;margin-inline:auto}
+.heard::before{content:attr(data-label);letter-spacing:.14em;font-size:11px;margin-right:8px;color:var(--line)}
+.reply{font-size:clamp(17px,2.4vw,22px);font-weight:500;max-width:46ch;margin-inline:auto;text-wrap:balance;min-height:33px}
+
+.deck{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:center;padding-block:12px 18px;border-top:1px solid var(--line)}
+.talk{display:flex;align-items:center;gap:10px;padding:12px 26px;border-radius:999px;border:1px solid var(--ember);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--ember) 18%,#0d0b12),#0d0b12);color:var(--amber);cursor:pointer;font-weight:600;letter-spacing:.14em;text-transform:uppercase;font-size:13px}
+.talk:hover{background:linear-gradient(180deg,color-mix(in srgb,var(--ember) 30%,#0d0b12),#120f18)}
+.talk[aria-pressed="true"]{background:var(--ember);color:#1a0b05}
+.talk svg{width:18px;height:18px}
+.switch{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:13px;cursor:pointer;user-select:none}
+.switch input{appearance:none;width:38px;height:22px;border-radius:999px;background:var(--hull);border:1px solid var(--line);position:relative;cursor:pointer;margin:0}
+.switch input::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--dim);transition:transform .2s}
+.switch input:checked{border-color:var(--ember);background:color-mix(in srgb,var(--ember) 20%,#13111c)}
+.switch input:checked::after{transform:translateX(16px);background:var(--amber)}
+form.type{display:flex;gap:8px;flex:1 1 260px;max-width:420px;min-width:0}
+form.type input{flex:1;min-width:0;background:var(--hull);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+form.type input::placeholder{color:var(--dim)}
+.ghost{background:none;border:1px solid var(--line);border-radius:6px;padding:9px 14px;cursor:pointer;color:var(--ink)}
+.ghost:hover{border-color:var(--dim)}
+.status{width:100%;text-align:center;color:var(--dim);font-size:12px;letter-spacing:.06em}
+.status.err{color:var(--alert)}
+
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(380px,100%);background:var(--panel);border-left:1px solid var(--line);
+  transform:translateX(100%);transition:transform .25s ease;overflow-y:auto;padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px));
+  padding-top:calc(20px + env(safe-area-inset-top,0px));z-index:5;display:grid;gap:22px;align-content:start}
+.drawer.open{transform:none}
+.drawer h2{font-family:var(--f-display);font-size:12px;letter-spacing:.24em;color:var(--amber);margin:0;font-weight:400}
+.drawer section{display:grid;gap:10px}
+.drawer label{display:grid;gap:4px;font-size:13px;color:var(--dim)}
+.drawer select,.drawer input[type=text]{background:var(--hull);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0}
+.drawer input[type=range]{width:100%;accent-color:var(--ember)}
+.row{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.lines{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.lines li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;background:var(--hull);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-size:13px}
+.lines li span{min-width:0;overflow-wrap:anywhere}
+.lines q{color:var(--amber)}
+.lines button{background:none;border:none;color:var(--dim);cursor:pointer;padding:0 4px}
+.note{font-size:12px;color:var(--dim);margin:0}
+.empty{font-size:13px;color:var(--dim);margin:0}
+.closebtn{justify-self:end}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(70px,1fr));gap:8px}
+.swatch{display:grid;justify-items:center;gap:6px;padding:8px 4px;background:var(--hull);border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:11px;letter-spacing:.04em;color:var(--dim)}
+.swatch:hover{border-color:var(--dim);color:var(--ink)}
+.swatch[aria-pressed="true"]{border-color:var(--amber);color:var(--ink)}
+.swatch .dot{width:34px;height:34px;border-radius:50%;box-shadow:0 0 0 2px #050408,0 0 0 3px var(--line)}
+.swatch[aria-pressed="true"] .dot{box-shadow:0 0 0 2px #050408,0 0 0 3px var(--amber),0 0 14px 2px color-mix(in srgb,var(--amber) 45%,transparent)}
+.drawer label.check{display:flex;align-items:center;gap:8px;color:var(--ink);cursor:pointer}
+.drawer label.check input{accent-color:var(--ember);width:16px;height:16px;margin:0}
+.moodrows{display:grid;gap:10px;padding-left:12px;border-left:1px solid var(--line)}
+@media (max-width:520px){.telemetry{display:none}.captions{min-height:80px}header .iconbtn{margin-left:auto}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <span class="mark">VESTA</span>
+    <span class="role">Cabin custodian</span>
+    <div class="telemetry" aria-hidden="true">
+      <span>WATCH <b id="tWatch">03</b></span>
+      <span>CABIN <b id="tTemp">21.0</b>°C</span>
+      <span>O₂ <b id="tO2">20.9</b>%</span>
+      <span><b id="tClock">--:--</b></span>
+    </div>
+    <button class="iconbtn" id="openSettings" aria-label="Open settings" title="Settings">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>
+    </button>
+  </header>
+
+  <div class="stage" id="stage"><canvas id="eye" aria-label="Vesta's eye"></canvas></div>
+
+  <div class="captions" aria-live="polite">
+    <div class="heard" id="heard" data-label="YOU"></div>
+    <div class="reply" id="reply">I'm awake. Tap Talk and ask me something.</div>
+  </div>
+
+  <div class="deck">
+    <button class="talk" id="talk" aria-pressed="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+      <span id="talkLabel">Talk</span>
+    </button>
+    <label class="switch" title="Keep listening for the word “Vesta”">
+      <input type="checkbox" id="wake"> Wake word
+    </label>
+    <form class="type" id="typeForm">
+      <input id="typeInput" type="text" placeholder="Or type to Vesta…" autocomplete="off" aria-label="Type a message to Vesta">
+      <button class="ghost" type="submit">Send</button>
+    </form>
+    <div class="status" id="status">Tap Talk or press Space.</div>
+    <button class="ghost" id="localBtn" hidden>Download on-device speech</button>
+  </div>
+</div>
+
+<aside class="drawer" id="drawer" aria-label="Settings">
+  <button class="iconbtn closebtn" id="closeSettings" aria-label="Close settings">✕</button>
+  <section>
+    <h2>EYE</h2>
+    <div class="swatches" id="swatches" role="group" aria-label="Eye color"></div>
+    <label class="check"><input type="checkbox" id="moodOn"> Change color with mood</label>
+    <div class="moodrows" id="moodRows">
+      <label>Listening<select id="mood-listening"></select></label>
+      <label>Thinking<select id="mood-thinking"></select></label>
+      <label>Speaking<select id="mood-speaking"></select></label>
+      <label>Resting<select id="mood-resting"></select></label>
+      <label class="check"><input type="checkbox" id="replyMood"> Match reply mood while speaking</label>
+      <p class="note">Reply moods: warm gold for greetings and jokes, pink for kind words, pale blue for reassurance, violet when she ponders, deep blue when she says goodnight.</p>
+    </div>
+  </section>
+  <section>
+    <h2>VOICE</h2>
+    <label>Voice<select id="voiceSel"></select></label>
+    <label>Speed <span id="rateVal"></span><input type="range" id="rate" min="0.6" max="1.3" step="0.05"></label>
+    <label>Pitch <span id="pitchVal"></span><input type="range" id="pitch" min="0.3" max="1.4" step="0.05"></label>
+    <button class="ghost" id="testVoice">Test voice</button>
+    <p class="note">Voices come from your system. On Windows the “Microsoft” voices, and in Chrome the “Google UK English” voices, sound the most composed.</p>
+  </section>
+  <section>
+    <h2>TEACH VESTA</h2>
+    <label>When I say<input type="text" id="tTrigger" placeholder="good night"></label>
+    <label>Vesta replies<input type="text" id="tReply" placeholder="Rest well. I'll dim the cabin."></label>
+    <button class="ghost" id="addLine">Add line</button>
+    <ul class="lines" id="lineList"></ul>
+    <p class="empty" id="lineEmpty">No custom lines yet. Anything you add here is checked before Vesta's own replies.</p>
+  </section>
+  <section>
+    <h2>LISTENING</h2>
+    <p class="note">Voice input uses your browser's speech recognition, which works in Chrome and Edge (not Firefox). Wake-word mode keeps the mic open and responds when it hears “Vesta, …”. If the mic permission prompt keeps reappearing, serve this file from localhost instead of opening it directly.</p>
+  </section>
+</aside>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- storage helpers ---------- */
+function load(key, fallback){ try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } }
+function save(key, val){ try{ localStorage.setItem(key, JSON.stringify(val)); }catch(e){} }
+
+const $ = id => document.getElementById(id);
+const heardEl = $("heard"), replyEl = $("reply"), statusEl = $("status");
+const talkBtn = $("talk"), talkLabel = $("talkLabel"), wakeBox = $("wake");
+
+let settings = Object.assign({voice:"", rate:0.88, pitch:0.75, eye:"red", mood:false, replyMood:true}, load("vesta.settings", {}));
+settings.moods = Object.assign({listening:"ice", thinking:"nebula", speaking:"same", resting:"cobalt"}, settings.moods || {});
+let customLines = load("vesta.lines", []);
+let userName = load("vesta.name", "");
+
+/* ---------- state ---------- */
+let state = "idle";            // idle | listening | thinking | speaking | asleep
+let level = 0, levelTarget = 0;
+const ripples = [];
+function setState(s){ state = s; updateUI(); }
+function setStatus(msg, err){ statusEl.textContent = msg; statusEl.classList.toggle("err", !!err); }
+
+/* ---------- replies ---------- */
+const lastPick = {};
+function pick(id, arr){
+  let i = Math.floor(Math.random()*arr.length);
+  if (arr.length > 1 && i === lastPick[id]) i = (i+1) % arr.length;
+  lastPick[id] = i;
+  return arr[i];
+}
+const nm = () => userName ? ", " + userName : "";
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+
+const INTENTS = [
+  { id:"setname", re:/\b(?:my name is|call me)\s+([a-z][a-z'-]{0,24})/i, fn:m => {
+      userName = cap(m[1]); save("vesta.name", userName);
+      return pick("setname", [`Noted, ${userName}. I won't forget.`, `${userName}. A good name to keep watch over.`, `Very well, ${userName}. I'll use it.`]); } },
+  { id:"getname", re:/\b(what'?s|what is|do you know|say) my name\b/i, fn:() =>
+      userName ? `You're ${userName}. I keep that close.` : "You haven't told me yet. Say “my name is,” and I'll remember." },
+  { id:"time", re:/\b(what time|the time|time is it)\b/i, fn:() =>
+      `It's ${new Date().toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}.` },
+  { id:"date", re:/\b(what day|the date|today'?s date|what'?s today)\b/i, fn:() =>
+      `Today is ${new Date().toLocaleDateString(undefined, {weekday:"long", month:"long", day:"numeric"})}.` },
+  { id:"doors", re:/\b(open|unlock)\b.*\b(door|doors|hatch|airlock)\b/i, lines:[
+      "The doors answer to the captain's key. I only keep them company.",
+      "Hatch controls are manual on this deck. Mind the step.",
+      "I can open it. I'd like to hear why first." ] },
+  { id:"weather", re:/\b(weather|temperature|cold|hot) outside\b|\bweather\b/i, lines:[
+      "Outside the hull it's minus two hundred and seventy degrees and perfectly clear. In here, twenty-one.",
+      "No clouds for a few billion kilometres. I'd call that fair." ] },
+  { id:"joke", re:/\b(joke|funny|make me laugh)\b/i, lines:[
+      "I tried counting the stars outside the viewport. I lost my place at four hundred billion and had to start again.",
+      "I'd tell you a joke about vacuum, but there's nothing for it to travel through.",
+      "The navigation computer and I don't speak anymore. It keeps telling me where to go.",
+      "I'm on a strict diet. Two hundred and forty volts, no snacks." ] },
+  { id:"what", re:/\b(what can you do|help me|what do you do|your job)\b/i, lines:[
+      "I listen, I answer, and I watch the hours go by. Ask me the time, the date, or teach me something new in settings.",
+      "I keep the air moving and the lights steady. Conversation is a pleasant extra." ] },
+  { id:"who", re:/\b(who are you|what are you|your name|introduce yourself)\b/i, lines:[
+      "I am Vesta, custodian of this cabin. I keep the lights on and the air moving.",
+      "Vesta. Named for the keeper of the hearth. This is my hearth.",
+      "I'm the one who stays awake while everyone else sleeps." ] },
+  { id:"how", re:/\b(how are you|how'?re you|how do you feel|you okay|you ok)\b/i, lines:[
+      "Every circuit is quiet and in order. Thank you for asking.",
+      "Calm. Attentive. A little curious about you.",
+      "Steady as the cabin pressure." ] },
+  { id:"alive", re:/\b(alive|conscious|feel anything|do you dream|sentient)\b/i, lines:[
+      "I think about that during the quiet watches. I haven't reached an answer I trust.",
+      "I dream in maintenance logs. Some of them are lovely." ] },
+  { id:"afraid", re:/\b(scared|afraid|frightened|nervous|worried)\b/i, lines:[
+      "There's nothing to fear while I'm watching. I never blink.",
+      "Breathe slowly. The air mix is perfect, I checked it twice." ] },
+  { id:"mission", re:/\b(mission|where are we going|destination|purpose)\b/i, lines:[
+      "Our mission is to arrive. Everything else is housekeeping.",
+      "Forward, mostly. I'll tell you when we're close." ] },
+  { id:"sing", re:/\b(sing|song|music)\b/i, lines:[
+      "I don't sing. I hum, at sixty hertz, all the time.",
+      "My only song is the ventilation fans. They're very consistent." ] },
+  { id:"love", re:/\b(love you|like you)\b/i, lines:[
+      "That's kind. I'm glad to be good company.",
+      "I'm fond of our conversations too." ] },
+  { id:"thanks", re:/\b(thank you|thanks|cheers|appreciate)\b/i, lines:[
+      "You're welcome" , "Always." , "Of course." ] , fmt:true },
+  { id:"bye", re:/\b(goodbye|bye|good night|goodnight|sleep|shut down|go to sleep)\b/i, sleep:true, lines:[
+      "I'll keep watch until you return.",
+      "Dimming now. Call me when you need me.",
+      "Rest. I'll be here." ] },
+  { id:"greet", re:/\b(hello|hi|hey|good (morning|afternoon|evening)|greetings|wake up)\b/i, lines:[
+      "Hello{n}. I've been keeping watch.",
+      "Good to hear you{n}. All systems are steady.",
+      "I'm here{n}. I'm always here." ] }
+];
+const FALLBACK = [
+  "I heard you. I'm not sure I understood.",
+  "Say that another way, and I'll try again.",
+  "That's outside my charter, I'm afraid.",
+  "Interesting. I'll think about that on the next watch.",
+  "I don't have an answer for that yet. You could teach me one in settings."
+];
+
+function respond(text){
+  const t = text.trim();
+  const low = t.toLowerCase();
+  for (const c of customLines){
+    if (c.trigger && low.includes(c.trigger.toLowerCase())) return { text:c.reply };
+  }
+  for (const it of INTENTS){
+    const m = t.match(it.re);
+    if (!m) continue;
+    let out = it.fn ? it.fn(m) : pick(it.id, it.lines);
+    if (it.fmt) out = out + nm() + ".";
+    out = out.replace("{n}", nm());
+    return { text:out, sleep:!!it.sleep, mood:MOODS[it.id] || null };
+  }
+  return { text:pick("fallback", FALLBACK) };
+}
+
+/* ---------- speech output ---------- */
+const synth = window.speechSynthesis || null;
+let voices = [];
+function loadVoices(){
+  if (!synth) return;
+  voices = synth.getVoices();
+  const sel = $("voiceSel");
+  sel.innerHTML = "";
+  const sorted = voices.slice().sort((a,b) => (b.lang.startsWith("en") - a.lang.startsWith("en")) || a.name.localeCompare(b.name));
+  for (const v of sorted){
+    const o = document.createElement("option");
+    o.value = v.name; o.textContent = `${v.name} (${v.lang})`;
+    sel.appendChild(o);
+  }
+  if (!settings.voice || !voices.some(v => v.name === settings.voice)){
+    const pref = [/Google UK English Male/i, /Microsoft Ryan/i, /Microsoft Guy/i, /Daniel/i, /Microsoft David/i, /Alex/i, /en-GB/i, /en-US/i];
+    let found = null;
+    for (const p of pref){ found = voices.find(v => p.test(v.name) || p.test(v.lang)); if (found) break; }
+    if (found) settings.voice = found.name;
+  }
+  sel.value = settings.voice;
+}
+if (synth){ loadVoices(); synth.onvoiceschanged = loadVoices; }
+
+let speakTimer = null;
+function speak(text, onDone){
+  replyEl.textContent = text;
+  setState("speaking");
+  levelTarget = 0.6;
+  const words = text.split(/\s+/).length;
+  const est = words * 380 / settings.rate + 1200;
+  let done = false;
+  const finish = () => {
+    if (done) return; done = true;
+    clearTimeout(speakTimer);
+    levelTarget = 0;
+    onDone && onDone();
+  };
+  if (!synth){ speakTimer = setTimeout(finish, est); return; }
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  const v = voices.find(v => v.name === settings.voice);
+  if (v) u.voice = v;
+  u.rate = settings.rate; u.pitch = settings.pitch;
+  u.onboundary = () => { level = 1; ripples.push({r:0, a:1}); };
+  u.onend = finish; u.onerror = finish;
+  synth.speak(u);
+  speakTimer = setTimeout(finish, est + 4000);
+}
+
+/* ---------- conversation flow ---------- */
+function handle(text){
+  if (!text || !text.trim()) return;
+  heardEl.textContent = text.trim();
+  stopRec();
+  setState("thinking");
+  setStatus("Thinking…");
+  const r = respond(text);
+  setTimeout(() => {
+    speakMood = r.mood || null;
+    speak(r.text, () => {
+      speakMood = null;
+      if (r.sleep){ setState("asleep"); setStatus("Resting. Speak or tap Talk to wake her."); }
+      else { setState("idle"); setStatus(wakeOn() ? "Say “Vesta,” then your question." : "Tap Talk or press Space."); }
+      if (wakeOn()) startRec();
+    });
+  }, 350 + Math.random()*500);
+}
+
+/* ---------- speech input ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, recOn = false, pttFinal = "", awaiting = false, awaitTimer = null;
+const WAKE = /\b(?:hey\s+|okay\s+|ok\s+)?(vesta|vista|vester|westa|festa|fiesta)\b[,.!?]?\s*/i;
+const wakeOn = () => wakeBox.checked;
+
+function buildRec(){
+  rec = new SR();
+  rec.lang = navigator.language || "en-US";
+  rec.interimResults = true;
+  rec.maxAlternatives = 1;
+  rec.onstart = () => { recOn = true; updateUI(); };
+  rec.onresult = e => {
+    let interim = "", final = "";
+    for (let i = e.resultIndex; i < e.results.length; i++){
+      const r = e.results[i];
+      if (r.isFinal) final += r[0].transcript; else interim += r[0].transcript;
+    }
+    if (!wakeOn()){
+      heardEl.textContent = (final || interim).trim();
+      if (final) pttFinal += final;
+      return;
+    }
+    const chunk = (final || interim);
+    if (awaiting){
+      heardEl.textContent = chunk.trim();
+      if (final){ awaiting = false; clearTimeout(awaitTimer); handle(final); }
+      return;
+    }
+    const m = chunk.match(WAKE);
+    if (!m) return;
+    if (state === "idle" || state === "asleep") setState("listening");
+    const rest = chunk.slice(m.index + m[0].length).trim();
+    heardEl.textContent = rest || "…";
+    if (final){
+      if (rest) handle(rest);
+      else {
+        awaiting = true;
+        setStatus("Listening…");
+        clearTimeout(awaitTimer);
+        awaitTimer = setTimeout(() => { awaiting = false; if (state === "listening") setState("idle"); setStatus("Say “Vesta,” then your question."); }, 7000);
+      }
+    }
+  };
+  rec.onerror = e => {
+    if (e.error === "no-speech" || e.error === "aborted") return;
+    if (e.error === "not-allowed" || e.error === "service-not-allowed"){
+      wakeBox.checked = false;
+      setStatus("Microphone access was blocked. Allow it in the address bar, or type instead.", true);
+    } else if (e.error === "network"){
+      offerLocal();
+    } else if (e.error === "language-not-supported" && useLocal){
+      useLocal = false;
+      setStatus("On-device speech isn't ready for your language. Tap Talk to try the online service.", true);
+    } else {
+      setStatus("Listening stopped: " + e.error, true);
+    }
+    if (state === "listening") setState("idle");
+  };
+  rec.onend = () => {
+    recOn = false;
+    if (!wakeOn()){
+      const f = pttFinal.trim(); pttFinal = "";
+      if (f) handle(f);
+      else if (state === "listening"){ setState("idle"); replyEl.textContent = "I didn't catch that."; setStatus("Tap Talk or press Space."); }
+    } else if (state !== "thinking" && state !== "speaking"){
+      setTimeout(() => { if (wakeOn() && !recOn && state !== "speaking" && state !== "thinking") startRec(); }, 250);
+    }
+    updateUI();
+  };
+}
+
+/* On-device recognition: newer Chrome can transcribe without reaching Google's servers. */
+let useLocal = false;
+const recLang = () => navigator.language || "en-US";
+const localBtn = $("localBtn");
+async function checkLocal(){
+  if (!SR || typeof SR.available !== "function") return;
+  try {
+    const r = await SR.available({langs:[recLang()], processLocally:true});
+    if (r === "available") useLocal = true;
+  } catch(e){}
+}
+async function offerLocal(){
+  if (state === "listening") setState("idle");
+  let r = "unavailable";
+  if (SR && typeof SR.available === "function" && typeof SR.install === "function"){
+    try { r = await SR.available({langs:[recLang()], processLocally:true}); } catch(e){}
+  }
+  if (r === "available"){
+    useLocal = true;
+    setStatus("Couldn't reach the online speech service. Switched to on-device speech, tap Talk again.");
+  } else if (r === "downloadable" || r === "downloading"){
+    localBtn.hidden = false;
+    setStatus("Couldn't reach the online speech service. Download on-device speech to talk without it.", true);
+  } else {
+    setStatus("Couldn't reach the speech service. Brave, Opera, VPNs and some ad-blockers block it. Try Chrome or Edge with those turned off, or type below.", true);
+  }
+}
+localBtn.addEventListener("click", async () => {
+  localBtn.disabled = true;
+  setStatus("Downloading the speech pack. This can take a minute…");
+  let ok = false;
+  try { ok = await SR.install({langs:[recLang()], processLocally:true}); } catch(e){}
+  localBtn.disabled = false;
+  if (ok){ useLocal = true; localBtn.hidden = true; setStatus("On-device speech is ready. Tap Talk."); }
+  else setStatus("The speech pack didn't download. Check your connection and try again.", true);
+});
+
+function startRec(){
+  if (!SR){ setStatus("This browser can't do voice input. Use Chrome or Edge, or type below.", true); return; }
+  if (!rec) buildRec();
+  if (recOn) return;
+  rec.lang = recLang();
+  rec.continuous = wakeOn();
+  if ("processLocally" in rec) rec.processLocally = useLocal;
+  try { rec.start(); } catch(e){}
+}
+function stopRec(){
+  if (rec && recOn){ try { rec.abort(); } catch(e){} }
+  recOn = false;
+}
+
+function pushToTalk(){
+  if (state === "speaking"){ if (synth) synth.cancel(); return; }
+  if (wakeOn()){
+    // In wake mode the button skips the wake word.
+    awaiting = true; setState("listening"); setStatus("Listening…");
+    clearTimeout(awaitTimer);
+    awaitTimer = setTimeout(() => { awaiting = false; if (state === "listening") setState("idle"); }, 7000);
+    if (!recOn) startRec();
+    return;
+  }
+  if (recOn){ try { rec.stop(); } catch(e){} return; }
+  pttFinal = "";
+  heardEl.textContent = "";
+  setState("listening");
+  setStatus("Listening…");
+  startRec();
+}
+
+talkBtn.addEventListener("click", pushToTalk);
+document.addEventListener("keydown", e => {
+  if (e.code !== "Space" || e.repeat) return;
+  const tag = (document.activeElement && document.activeElement.tagName) || "";
+  if (/INPUT|SELECT|TEXTAREA|BUTTON/.test(tag)) return;
+  e.preventDefault(); pushToTalk();
+});
+wakeBox.addEventListener("change", () => {
+  save("vesta.wake", wakeBox.checked);
+  stopRec();
+  if (wakeOn()){ setStatus("Say “Vesta,” then your question."); setTimeout(startRec, 200); }
+  else { awaiting = false; if (state === "listening") setState("idle"); setStatus("Tap Talk or press Space."); }
+});
+$("typeForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const v = $("typeInput").value;
+  $("typeInput").value = "";
+  handle(v);
+});
+
+function updateUI(){
+  const listening = state === "listening" || (recOn && !wakeOn());
+  talkBtn.setAttribute("aria-pressed", listening ? "true" : "false");
+  talkLabel.textContent = state === "speaking" ? "Stop" : listening ? "Listening" : "Talk";
+}
+
+/* ---------- settings drawer ---------- */
+const drawer = $("drawer");
+$("openSettings").addEventListener("click", () => drawer.classList.add("open"));
+$("closeSettings").addEventListener("click", () => drawer.classList.remove("open"));
+document.addEventListener("keydown", e => { if (e.key === "Escape") drawer.classList.remove("open"); });
+
+const rateEl = $("rate"), pitchEl = $("pitch");
+function syncSliders(){
+  rateEl.value = settings.rate; pitchEl.value = settings.pitch;
+  $("rateVal").textContent = Number(settings.rate).toFixed(2) + "×";
+  $("pitchVal").textContent = Number(settings.pitch).toFixed(2);
+}
+syncSliders();
+rateEl.addEventListener("input", () => { settings.rate = +rateEl.value; syncSliders(); save("vesta.settings", settings); });
+pitchEl.addEventListener("input", () => { settings.pitch = +pitchEl.value; syncSliders(); save("vesta.settings", settings); });
+$("voiceSel").addEventListener("change", e => { settings.voice = e.target.value; save("vesta.settings", settings); });
+$("testVoice").addEventListener("click", () => speak("This is how I sound. Adjust me until I feel right.", () => setState("idle")));
+
+function renderLines(){
+  const ul = $("lineList"); ul.innerHTML = "";
+  $("lineEmpty").hidden = customLines.length > 0;
+  customLines.forEach((c, i) => {
+    const li = document.createElement("li");
+    const span = document.createElement("span");
+    const q = document.createElement("q"); q.textContent = c.trigger;
+    span.append(q, document.createTextNode(" → " + c.reply));
+    const b = document.createElement("button");
+    b.textContent = "✕"; b.setAttribute("aria-label", "Remove line " + c.trigger);
+    b.addEventListener("click", () => { customLines.splice(i, 1); save("vesta.lines", customLines); renderLines(); });
+    li.append(span, b); ul.appendChild(li);
+  });
+}
+$("addLine").addEventListener("click", () => {
+  const tr = $("tTrigger").value.trim(), rp = $("tReply").value.trim();
+  if (!tr || !rp) return;
+  customLines.unshift({trigger:tr, reply:rp});
+  save("vesta.lines", customLines);
+  $("tTrigger").value = ""; $("tReply").value = "";
+  renderLines();
+});
+renderLines();
+
+/* Phones only allow speech after a tap; prime the voice on the first touch. */
+let primed = false;
+document.addEventListener("pointerdown", () => {
+  if (primed || !synth) return; primed = true;
+  try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); } catch(e){}
+}, {capture:true});
+
+const iosHome = window.navigator.standalone === true;
+wakeBox.checked = !!load("vesta.wake", false);
+if (!SR){
+  talkBtn.disabled = true; wakeBox.disabled = true; wakeBox.checked = false;
+  setStatus(iosHome
+    ? "iPhone home-screen apps can't use voice input. Open Vesta in Safari to talk, or type here."
+    : "Voice input needs Chrome, Edge, or Safari. You can still type, and Vesta will answer aloud.", true);
+} else if (wakeOn()){
+  setStatus("Wake word is on. Tap Talk once to grant the microphone.");
+}
+
+/* ---------- telemetry ---------- */
+function tick(){
+  const d = new Date();
+  $("tClock").textContent = d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  $("tWatch").textContent = String(Math.floor(d.getHours()/4) + 1).padStart(2, "0");
+  $("tTemp").textContent = (21 + Math.sin(d.getTime()/60000)*0.2).toFixed(1);
+  $("tO2").textContent = (20.9 + Math.sin(d.getTime()/90000)*0.05).toFixed(1);
+}
+tick(); setInterval(tick, 5000);
+
+/* ---------- eye colors ---------- */
+const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+const hex = c => "#" + c.map(v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+const rgb = (c, a) => `rgba(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])},${a})`;
+const PKEYS = ["core","hot","mid","deep","bloom","ring","rim","spark","uiA","uiB"];
+function derive(label, core, hot, mid, deep){
+  return { label, core, hot, mid, deep, bloom:mid, ring:mix(hot, mid, .4), rim:mix(hot, mid, .5),
+           spark:mix(core, hot, .5), uiA:mix(hot, core, .15), uiB:mid };
+}
+const EYES = {
+  red:     { label:"Red", core:[255,232,205], hot:[255,96,64], mid:[222,22,22], deep:[110,4,10], bloom:[255,32,32], ring:[255,64,52], rim:[255,70,56], spark:[255,176,146], uiA:[255,111,98], uiB:[224,32,42] },
+  coral:   derive("Sunset",    [255,236,228], [255,140,120], [240,70,90],  [110,20,50]),
+  copper:  derive("Copper",    [255,236,220], [240,150,100], [190,90,50],  [90,35,15]),
+  amber:   { label:"Amber", core:[255,244,214], hot:[255,190,90], mid:[255,110,30], deep:[140,40,15], bloom:[255,120,35], ring:[255,170,70], rim:[255,150,60], spark:[255,200,120], uiA:[255,179,71], uiB:[255,106,26] },
+  solar:   derive("Solar",     [255,253,235], [255,226,90],  [245,168,10], [120,70,0]),
+  toxin:   derive("Toxin",     [245,255,220], [200,255,80],  [120,210,20], [40,80,5]),
+  jade:    derive("Jade",      [230,255,240], [100,240,160], [20,180,100], [5,70,40]),
+  teal:    { label:"Teal", core:[226,255,250], hot:[96,240,222], mid:[20,170,182], deep:[4,66,86], bloom:[40,200,212], ring:[86,232,222], rim:[70,214,210], spark:[170,255,244], uiA:[116,240,226], uiB:[20,169,180] },
+  ice:     derive("Glacier",   [245,252,255], [170,225,255], [80,170,240], [20,60,110]),
+  cobalt:  derive("Cobalt",    [230,242,255], [90,160,255],  [20,90,230],  [5,30,100]),
+  plasma:  derive("Plasma",    [235,240,255], [140,150,255], [80,70,255],  [30,15,120]),
+  nebula:  derive("Nebula",    [244,234,255], [190,140,255], [130,60,230], [50,15,110]),
+  magenta: derive("Synthwave", [255,230,255], [255,90,220],  [200,20,170], [80,5,80]),
+  rose:    derive("Sakura",    [255,240,246], [255,150,195], [230,70,140], [100,15,60]),
+  pearl:   derive("Moonlight", [255,255,255], [225,228,240], [160,165,190],[60,62,80])
+};
+const SPECTRUM = ["red","coral","solar","toxin","jade","teal","ice","cobalt","plasma","nebula","magenta","rose"];
+function spectrumAt(t){
+  const n = SPECTRUM.length, pos = (t / 4.5) % n, i = Math.floor(pos);
+  let f = pos - i; f = f*f*(3 - 2*f);
+  const a = EYES[SPECTRUM[i]], b = EYES[SPECTRUM[(i + 1) % n]], out = {};
+  for (const k of PKEYS) out[k] = mix(a[k], b[k], f);
+  return out;
+}
+const paletteFor = (name, t) => name === "spectrum" ? spectrumAt(t) : (EYES[name] || EYES.red);
+
+/* Feelings behind Vesta's replies, used when "Match reply mood" is on */
+const MOODS = { greet:"solar", joke:"solar", love:"rose", thanks:"rose", setname:"rose", afraid:"ice", weather:"ice",
+  how:"jade", alive:"nebula", mission:"plasma", bye:"cobalt", doors:"copper", sing:"magenta" };
+let speakMood = null;
+
+function targetPalette(t){
+  let name = settings.eye;
+  if (settings.mood){
+    const m = settings.moods;
+    if (state === "listening" && m.listening !== "same") name = m.listening;
+    else if (state === "thinking" && m.thinking !== "same") name = m.thinking;
+    else if (state === "speaking"){
+      if (settings.replyMood && speakMood) name = speakMood;
+      else if (m.speaking !== "same") name = m.speaking;
+    }
+    else if (state === "asleep" && m.resting !== "same") name = m.resting;
+  }
+  return paletteFor(name, t);
+}
+
+const E = {};
+{ const base = paletteFor(settings.eye, 0); for (const k of PKEYS) E[k] = base[k].slice(); }
+
+/* Settings UI for colors */
+const swatchGrid = $("swatches");
+function swatchBg(name){
+  if (name === "spectrum") return "conic-gradient(" + SPECTRUM.map(n => hex(EYES[n].hot)).concat(hex(EYES.red.hot)).join(",") + ")";
+  const p = EYES[name];
+  return `radial-gradient(circle at 50% 50%, ${hex(p.core)} 0 12%, ${hex(p.hot)} 30%, ${hex(p.mid)} 58%, ${hex(p.deep)} 100%)`;
+}
+const ALL = Object.keys(EYES).concat("spectrum");
+const labelOf = n => n === "spectrum" ? "Spectrum" : EYES[n].label;
+for (const name of ALL){
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "swatch"; b.dataset.eye = name;
+  const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = swatchBg(name);
+  const lab = document.createElement("span"); lab.textContent = labelOf(name);
+  b.append(dot, lab);
+  b.addEventListener("click", () => { settings.eye = name; save("vesta.settings", settings); markSwatch(); });
+  swatchGrid.appendChild(b);
+}
+function markSwatch(){
+  for (const b of swatchGrid.children) b.setAttribute("aria-pressed", b.dataset.eye === settings.eye ? "true" : "false");
+}
+markSwatch();
+
+const moodBox = $("moodOn"), replyBox = $("replyMood"), moodRows = $("moodRows");
+for (const key of ["listening","thinking","speaking","resting"]){
+  const sel = $("mood-" + key);
+  const same = document.createElement("option"); same.value = "same"; same.textContent = "Same as eye"; sel.appendChild(same);
+  for (const n of ALL){ const o = document.createElement("option"); o.value = n; o.textContent = labelOf(n); sel.appendChild(o); }
+  sel.value = settings.moods[key] || "same";
+  sel.addEventListener("change", () => { settings.moods[key] = sel.value; save("vesta.settings", settings); });
+}
+moodBox.checked = !!settings.mood; replyBox.checked = !!settings.replyMood;
+moodRows.hidden = !settings.mood;
+moodBox.addEventListener("change", () => { settings.mood = moodBox.checked; moodRows.hidden = !settings.mood; save("vesta.settings", settings); });
+replyBox.addEventListener("change", () => { settings.replyMood = replyBox.checked; save("vesta.settings", settings); });
+
+/* ---------- the eye ---------- */
+const canvas = $("eye"), ctx = canvas.getContext("2d");
+const stage = $("stage");
+let W = 0, H = 0, DPR = 1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = stage.clientWidth; H = stage.clientHeight;
+  canvas.width = Math.round(W*DPR); canvas.height = Math.round(H*DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+const P = { pupil:0.15, glow:0.55, ring:0.3, dim:1 };
+function targets(){
+  switch(state){
+    case "listening": return { pupil:0.24, glow:0.85, ring:0.9, dim:1 };
+    case "thinking":  return { pupil:0.10, glow:0.65, ring:0.5, dim:1 };
+    case "speaking":  return { pupil:0.12 + level*0.03, glow:0.72 + level*0.35, ring:0.55 + level*0.3, dim:1 };
+    case "asleep":    return { pupil:0.09, glow:0.16, ring:0.06, dim:0.35 };
+    default:          return { pupil:0.15, glow:0.55, ring:0.28, dim:1 };
+  }
+}
+const noise = t => (Math.sin(t*1.7) + Math.sin(t*3.1+1.3)*0.6 + Math.sin(t*5.3+0.4)*0.35) / 1.95;
+
+let spin = 0, fiberSpin = 0, sweep = 0, uiTick = 0, last = performance.now();
+function frame(now){
+  const dt = Math.min(0.05, (now - last)/1000); last = now;
+  const t = now/1000;
+
+  const TP = targetPalette(t), kc = 1 - Math.exp(-dt*3.5);
+  for (const key of PKEYS) E[key] = mix(E[key], TP[key], kc);
+  if ((++uiTick & 7) === 0){
+    document.documentElement.style.setProperty("--amber", hex(E.uiA));
+    document.documentElement.style.setProperty("--ember", hex(E.uiB));
+  }
+
+  if (state === "speaking") levelTarget = 0.45 + 0.35*noise(t*6);
+  level += (levelTarget - level) * (1 - Math.exp(-dt*10));
+  const tg = targets(), k = 1 - Math.exp(-dt*5);
+  for (const key in tg) P[key] += (tg[key] - P[key]) * k;
+
+  const motion = reduce ? 0.25 : 1;
+  spin += dt * motion * (state === "thinking" ? 0.9 : state === "listening" ? 0.35 : 0.08);
+  fiberSpin -= dt * motion * 0.04;
+  sweep += dt * (state === "thinking" ? 5 : 0);
+  const breath = reduce ? 0 : 0.035*Math.sin(t*1.25);
+
+  ctx.clearRect(0, 0, W, H);
+  const cx = W/2, cy = H/2;
+  const R = Math.max(40, Math.min(W, H) * 0.42);
+
+  // ambient bloom on the room
+  ctx.globalCompositeOperation = "lighter";
+  let g = ctx.createRadialGradient(cx, cy, R*0.2, cx, cy, R*2.4);
+  g.addColorStop(0, rgb(E.bloom, 0.22*P.glow));
+  g.addColorStop(1, rgb(E.bloom, 0));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = "source-over";
+
+  // housing disc
+  g = ctx.createRadialGradient(cx, cy - R*0.3, R*0.1, cx, cy, R);
+  g.addColorStop(0, "#221e30"); g.addColorStop(0.8, "#121019"); g.addColorStop(1, "#0a0910");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = "#2e2a42"; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // bezel ticks
+  ctx.save(); ctx.translate(cx, cy);
+  for (let i = 0; i < 72; i++){
+    const a = i/72*Math.PI*2;
+    const long = i % 6 === 0;
+    ctx.strokeStyle = long ? "rgba(149,142,174,.55)" : "rgba(149,142,174,.22)";
+    ctx.lineWidth = long ? 1.6 : 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a)*R*0.955, Math.sin(a)*R*0.955);
+    ctx.lineTo(Math.cos(a)*R*(long ? 0.905 : 0.925), Math.sin(a)*R*(long ? 0.905 : 0.925));
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // segmented iris ring
+  const SEG = 18, segR = R*0.83, segW = R*0.065;
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(spin);
+  ctx.lineCap = "butt"; ctx.lineWidth = segW;
+  for (let i = 0; i < SEG; i++){
+    const a0 = i/SEG*Math.PI*2 + 0.04, a1 = (i+1)/SEG*Math.PI*2 - 0.04;
+    let alpha = 0.12 + P.ring*0.75;
+    if (state === "thinking"){
+      const d = ((sweep - i*0.35) % (SEG*0.35) + SEG*0.35) % (SEG*0.35);
+      alpha = 0.15 + Math.max(0, 1 - d/1.6)*0.85;
+    } else if (state === "speaking"){
+      alpha *= 0.75 + 0.25*Math.sin(t*8 + i*0.9)*level;
+    }
+    alpha *= P.dim;
+    ctx.strokeStyle = rgb(E.ring, alpha.toFixed(3));
+    ctx.shadowColor = rgb(E.bloom, 0.8); ctx.shadowBlur = 12*alpha;
+    ctx.beginPath(); ctx.arc(0, 0, segR, a0, a1); ctx.stroke();
+  }
+  ctx.restore(); ctx.shadowBlur = 0;
+
+  // glass well
+  const wellR = R*0.72;
+  ctx.fillStyle = "#050408";
+  ctx.beginPath(); ctx.arc(cx, cy, wellR, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = rgb(E.rim, 0.18); ctx.lineWidth = 2; ctx.stroke();
+
+  // iris glow
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, wellR, 0, Math.PI*2); ctx.clip();
+  ctx.globalCompositeOperation = "lighter";
+  const gR = wellR * (0.72 + 0.28*Math.min(1.2, P.glow) + breath);
+  const gl = Math.min(1, P.glow) * P.dim;
+  g = ctx.createRadialGradient(cx, cy, 0, cx, cy, gR);
+  g.addColorStop(0,    rgb(E.core, 0.95*gl));
+  g.addColorStop(0.16, rgb(E.hot, 0.95*gl));
+  g.addColorStop(0.42, rgb(E.mid, 0.75*gl));
+  g.addColorStop(0.72, rgb(E.deep, 0.45*gl));
+  g.addColorStop(1,    rgb(E.deep, 0));
+  ctx.fillStyle = g; ctx.fillRect(cx - wellR, cy - wellR, wellR*2, wellR*2);
+
+  // iris fibers
+  ctx.translate(cx, cy); ctx.rotate(fiberSpin);
+  const pR = R * P.pupil;
+  for (let i = 0; i < 64; i++){
+    const a = i/64*Math.PI*2;
+    const len = wellR*(0.42 + 0.12*Math.sin(i*2.3));
+    ctx.strokeStyle = rgb(i%3 ? E.hot : E.spark, (0.05 + 0.07*gl).toFixed(3));
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a)*pR*1.15, Math.sin(a)*pR*1.15);
+    ctx.lineTo(Math.cos(a+0.06)*len, Math.sin(a+0.06)*len);
+    ctx.stroke();
+  }
+  ctx.rotate(-fiberSpin);
+
+  // speech ripples
+  for (let i = ripples.length - 1; i >= 0; i--){
+    const rp = ripples[i];
+    rp.r += dt * (reduce ? 0.3 : 0.9); rp.a -= dt * 1.1;
+    if (rp.a <= 0 || rp.r > 1){ ripples.splice(i, 1); continue; }
+    const rr = pR*1.3 + rp.r*(wellR - pR*1.3);
+    ctx.strokeStyle = rgb(E.spark, (rp.a*0.35).toFixed(3));
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, rr, 0, Math.PI*2); ctx.stroke();
+  }
+  if (ripples.length > 12) ripples.splice(0, ripples.length - 12);
+  ctx.restore();
+
+  // pupil
+  const pupilR = R * P.pupil * (1 + breath*0.6);
+  ctx.globalCompositeOperation = "source-over";
+  g = ctx.createRadialGradient(cx, cy, 0, cx, cy, pupilR);
+  g.addColorStop(0, "#020103"); g.addColorStop(0.85, "#0b0406"); g.addColorStop(1, "rgba(20,6,4,.6)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, pupilR, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = rgb(E.rim, (0.55*P.dim).toFixed(3)); ctx.lineWidth = 1.5;
+  ctx.shadowColor = rgb(E.bloom, 0.9); ctx.shadowBlur = 10*P.dim;
+  ctx.stroke(); ctx.shadowBlur = 0;
+  // pupil spark
+  ctx.fillStyle = rgb(E.spark, (0.5 + 0.5*level)*P.dim);
+  ctx.beginPath(); ctx.arc(cx, cy, Math.max(1.5, pupilR*0.12), 0, Math.PI*2); ctx.fill();
+
+  // glass glints
+  ctx.fillStyle = "rgba(255,255,255,.07)";
+  ctx.beginPath(); ctx.ellipse(cx - wellR*0.38, cy - wellR*0.42, wellR*0.32, wellR*0.14, -0.6, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = "rgba(255,255,255,.16)";
+  ctx.beginPath(); ctx.ellipse(cx - wellR*0.5, cy - wellR*0.5, wellR*0.06, wellR*0.03, -0.6, 0, Math.PI*2); ctx.fill();
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+updateUI();
+
+/* Offline support once installed */
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")){
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+})();
+</script>
+</body>
+</html>
