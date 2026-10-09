@@ -198,6 +198,7 @@ form.type input::placeholder{color:var(--dim)}
     <div class="moodrows" id="kokoroRows">
       <label>Natural voice<select id="kVoiceSel"></select></label>
       <label>Voice pitch <span id="kPitchVal"></span><input type="range" id="kPitch" min="0.8" max="1.1" step="0.01"></label>
+      <label>Pause between sentences <span id="kGapVal"></span><input type="range" id="kGap" min="0.1" max="1" step="0.05"></label>
       <label>Speaker effect<select id="fxSel">
         <option value="off">None</option>
         <option value="room">Subtle room</option>
@@ -266,7 +267,7 @@ const $ = id => document.getElementById(id);
 const heardEl = $("heard"), replyEl = $("reply"), statusEl = $("status");
 const talkBtn = $("talk"), talkLabel = $("talkLabel"), wakeBox = $("wake");
 
-const DEFAULTS = {voice:"", rate:0.95, pitch:1, accent:"auto", engine:"system", kVoice:"bf_emma", kGpu:false, kPitch:1, fx:"off", calm:false, flat:false, brain:"scripted", gModel:"", gPersona:"", eye:"red", mood:false, replyMood:true, keepAwake:false, haptics:true};
+const DEFAULTS = {voice:"", rate:0.95, pitch:1, accent:"auto", engine:"system", kVoice:"bf_emma", kGpu:false, kPitch:1, kGap:0.4, fx:"off", calm:false, flat:false, brain:"scripted", gModel:"", gPersona:"", eye:"red", mood:false, replyMood:true, keepAwake:false, haptics:true};
 let settings = Object.assign({}, DEFAULTS, load("vesta.settings", {}));
 settings.moods = Object.assign({listening:"ice", thinking:"nebula", speaking:"same", resting:"cobalt"}, settings.moods || {});
 let customLines = load("vesta.lines", []);
@@ -431,33 +432,98 @@ function ensureAudio(){
   if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
   return audioCtx;
 }
+/* The voice model runs in a background worker so generating speech never freezes the screen.
+   If this browser can't start the worker, it falls back to running on the page itself. */
+let kWorker = null, kReqId = 0, kProgress = null;
+const kPending = new Map();
+function startKokoroWorker(){
+  const src = `
+    import { KokoroTTS } from "${KOKORO_URL}";
+    let tts = null;
+    self.onmessage = async (e) => {
+      const m = e.data;
+      try {
+        if (m.type === "load"){
+          tts = await KokoroTTS.from_pretrained(m.model, { dtype: m.dtype, device: m.device,
+            progress_callback: p => { if (p && p.status === "progress") self.postMessage({ type:"progress", status:"progress", file:p.file, loaded:p.loaded, total:p.total }); } });
+          self.postMessage({ type:"done", id:m.id });
+        } else if (m.type === "gen"){
+          const raw = await tts.generate(m.text, { voice: m.voice, speed: m.speed });
+          const audio = new Float32Array(raw.audio);
+          self.postMessage({ type:"done", id:m.id, audio, sr: raw.sampling_rate }, [audio.buffer]);
+        }
+      } catch(err){ self.postMessage({ type:"error", id:m.id, message: String((err && err.message) || err) }); }
+    };`;
+  const url = URL.createObjectURL(new Blob([src], { type:"text/javascript" }));
+  const w = new Worker(url, { type:"module" });
+  w.onmessage = e => {
+    const m = e.data;
+    if (m.type === "progress"){ if (kProgress) kProgress(m); return; }
+    const p = kPending.get(m.id); if (!p) return;
+    kPending.delete(m.id);
+    if (m.type === "error") p.reject(new Error(m.message)); else p.resolve(m);
+  };
+  w.onerror = e => {
+    e.preventDefault && e.preventDefault();
+    const err = new Error((e && e.message) || "The voice worker stopped");
+    for (const [, p] of kPending) p.reject(err);
+    kPending.clear();
+  };
+  return w;
+}
+function kCall(msg){
+  return new Promise((resolve, reject) => {
+    const id = ++kReqId;
+    kPending.set(id, { resolve, reject });
+    kWorker.postMessage(Object.assign({}, msg, { id }));
+  });
+}
+function stopKokoroWorker(){
+  if (kWorker){ try { kWorker.terminate(); } catch(e){} kWorker = null; }
+  for (const [, p] of kPending) p.reject(new Error("Voice engine restarted"));
+  kPending.clear();
+}
 function loadKokoro(){
   if (kokoro) return Promise.resolve(kokoro);
   if (kokoroLoading) return kokoroLoading;
   kokoroLoading = (async () => {
     setKStatus("Loading the voice engine…");
-    const mod = await import(KOKORO_URL);
     let gpu = false;
     if (settings.kGpu && navigator.gpu){ try { gpu = !!(await navigator.gpu.requestAdapter()); } catch(e){} }
+    const opts = { dtype: gpu ? "fp32" : "q8", device: gpu ? "webgpu" : "wasm" };
     const files = {};
     let lastShown = 0;
-    const tts = await mod.KokoroTTS.from_pretrained(KOKORO_MODEL, {
-      dtype: gpu ? "fp32" : "q8", device: gpu ? "webgpu" : "wasm",
-      progress_callback: pr => {
-        if (pr.status !== "progress" || !pr.total) return;
-        files[pr.file] = [pr.loaded, pr.total];
-        let l = 0, t = 0; for (const k in files){ l += files[k][0]; t += files[k][1]; }
-        const now = performance.now(); if (now - lastShown < 250) return; lastShown = now;
-        const msg = `Downloading the natural voice: ${Math.round(l/1e6)} of ${Math.round(t/1e6)} MB`;
-        setKStatus(msg); if (state === "thinking") setStatus(msg);
+    kProgress = pr => {
+      if (pr.status !== "progress" || !pr.total) return;
+      files[pr.file] = [pr.loaded, pr.total];
+      let l = 0, t = 0; for (const k in files){ l += files[k][0]; t += files[k][1]; }
+      const now = performance.now(); if (now - lastShown < 250) return; lastShown = now;
+      const msg = `Downloading the natural voice: ${Math.round(l/1e6)} of ${Math.round(t/1e6)} MB`;
+      setKStatus(msg); if (state === "thinking") setStatus(msg);
+    };
+    let engine = null, inWorker = false;
+    if (typeof Worker === "function"){
+      try {
+        kWorker = startKokoroWorker();
+        await kCall({ type:"load", model: KOKORO_MODEL, dtype: opts.dtype, device: opts.device });
+        engine = { generate: (text, o) => kCall({ type:"gen", text, voice: o.voice, speed: o.speed })
+                                            .then(m => ({ audio: m.audio, sampling_rate: m.sr })) };
+        inWorker = true;
+      } catch(e){
+        stopKokoroWorker();
+        if (/fetch|network|load failed/i.test((e && e.message) || "")) throw e;   // a download problem won't be fixed by the fallback
       }
-    });
+    }
+    if (!engine){
+      const mod = await import(KOKORO_URL);
+      engine = await mod.KokoroTTS.from_pretrained(KOKORO_MODEL, Object.assign({}, opts, { progress_callback: pr => kProgress(pr) }));
+    }
     setKStatus("Warming up the voice…");
-    try { await tts.generate("Ready.", { voice: settings.kVoice || "bf_emma", speed: 1 }); } catch(e){}
-    kokoro = tts;
-    setKStatus(gpu ? "Natural voice ready (using the GPU)." : "Natural voice ready.");
+    try { await engine.generate("Ready.", { voice: settings.kVoice || "bf_emma", speed: 1 }); } catch(e){}
+    kokoro = engine;
+    setKStatus((gpu ? "Natural voice ready (using the GPU)." : "Natural voice ready.") + (inWorker ? "" : " Note: the screen may pause while she prepares speech on this device."));
     $("kLoad").hidden = true;
-    return tts;
+    return engine;
   })().catch(err => {
     kokoroLoading = null;
     setKStatus("The natural voice didn't load (" + ((err && err.message) || err) + "). Vesta will use the system voice until it does.", true);
@@ -468,6 +534,7 @@ function loadKokoro(){
 /* Pitch: play slightly slower (lower) and have the model speak slightly faster to keep the same pace */
 const kPitchNow = () => Math.min(1.1, Math.max(0.8, +settings.kPitch || 1));
 const kSpeedNow = () => Math.min(2, Math.max(0.5, settings.rate / kPitchNow()));
+const kGapNow = () => Math.min(1, Math.max(0.1, +settings.kGap || 0.4));
 
 /* Speaker effects, built from Web Audio filters and a generated room impulse */
 let fxNodes = { key:"", input:null };
@@ -534,17 +601,22 @@ function playRaw(raw, isLive){
     src.start();
   });
 }
-/* The whole reply is generated first, then joined into one continuous recording, so she never
-   stalls between sentences. Pieces stay under ~320 characters, which the model handles well. */
+/* Each sentence is generated separately, all before she starts speaking, then joined with a set
+   pause. That gives clean breaks between sentences without stalls. Very long sentences are split
+   at commas so each piece stays within what the model handles well (~320 characters). */
 function chunkText(text){
   const sents = (text.match(/[^.!?]+[.!?]+["”’)]*\s*|[^.!?]+$/g) || [text]).map(x => x.trim()).filter(Boolean);
-  const chunks = []; let cur = "";
+  const out = [];
   for (const sen of sents){
-    if (cur && (cur + " " + sen).length > 320){ chunks.push(cur); cur = sen; }
-    else cur = cur ? cur + " " + sen : sen;
+    if (sen.length <= 320){ out.push(sen); continue; }
+    let cur = "";
+    for (const bit of sen.split(/(?<=,)\s+/)){
+      if (cur && (cur + " " + bit).length > 320){ out.push(cur); cur = bit; }
+      else cur = cur ? cur + " " + bit : bit;
+    }
+    if (cur) out.push(cur);
   }
-  if (cur) chunks.push(cur);
-  return chunks.length ? chunks : [text];
+  return out.length ? out : [text];
 }
 function trimSilence(a, sr){
   const th = 0.004, pad = Math.floor(sr * 0.03);
@@ -575,7 +647,7 @@ async function speakKokoro(text, isLive, finish, fallback){
       if (!isLive()) return;
     }
     setState("speaking");
-    await playRaw(joinAudio(raws, settings.calm ? 0.16 : 0.09), isLive);
+    await playRaw(joinAudio(raws, kGapNow()), isLive);
     if (!isLive()) return;
     finish();
   } catch(e){
@@ -1002,6 +1074,7 @@ function syncSliders(){
   $("rateVal").textContent = Number(settings.rate).toFixed(2) + "×";
   $("pitchVal").textContent = Number(settings.pitch).toFixed(2);
   $("kPitch").value = kPitchNow(); $("kPitchVal").textContent = kPitchNow().toFixed(2);
+  $("kGap").value = kGapNow(); $("kGapVal").textContent = kGapNow().toFixed(2) + " s";
   $("calmBox").checked = !!settings.calm;
   $("flatBox").checked = !!settings.flat;
   $("fxSel").value = settings.fx || "off";
@@ -1009,6 +1082,7 @@ function syncSliders(){
 syncSliders();
 rateEl.addEventListener("input", () => { settings.rate = +rateEl.value; syncSliders(); save("vesta.settings", settings); });
 $("kPitch").addEventListener("input", e => { settings.kPitch = +e.target.value; syncSliders(); save("vesta.settings", settings); });
+$("kGap").addEventListener("input", e => { settings.kGap = +e.target.value; syncSliders(); save("vesta.settings", settings); });
 $("fxSel").addEventListener("change", e => { settings.fx = e.target.value; save("vesta.settings", settings); });
 $("calmBox").addEventListener("change", e => { settings.calm = e.target.checked; save("vesta.settings", settings); });
 $("flatBox").addEventListener("change", e => { settings.flat = e.target.checked; save("vesta.settings", settings); });
@@ -1125,7 +1199,7 @@ function syncEngineUI(){
 syncEngineUI();
 engineSel.addEventListener("change", () => { settings.engine = engineSel.value; save("vesta.settings", settings); syncEngineUI(); });
 $("calmPreset").addEventListener("click", () => {
-  Object.assign(settings, { engine: AC ? "kokoro" : "system", kVoice:"bf_emma", rate:0.9, kPitch:0.98, fx:"soft", calm:true, flat:true, accent:"en-GB", pitch:1 });
+  Object.assign(settings, { engine: AC ? "kokoro" : "system", kVoice:"bf_emma", rate:0.9, kPitch:0.98, kGap:0.45, fx:"soft", calm:true, flat:true, accent:"en-GB", pitch:1 });
   save("vesta.settings", settings); syncEngineUI(); syncSliders();
   ensureAudio();
   if (settings.engine === "kokoro"){
@@ -1138,7 +1212,7 @@ $("calmPreset").addEventListener("click", () => {
 kVoiceSel.addEventListener("change", () => { settings.kVoice = kVoiceSel.value; save("vesta.settings", settings); });
 kGpuBox.addEventListener("change", () => {
   settings.kGpu = kGpuBox.checked; save("vesta.settings", settings);
-  kokoro = null; kokoroLoading = null; $("kLoad").hidden = false;
+  stopKokoroWorker(); kokoro = null; kokoroLoading = null; $("kLoad").hidden = false;
   syncEngineUI(); setKStatus("Tap Download to load the voice with the new setting.");
 });
 $("kLoad").addEventListener("click", () => {
@@ -1147,7 +1221,7 @@ $("kLoad").addEventListener("click", () => {
 });
 /* If the natural voice is already downloaded, warm it up in the background so the first reply is quick */
 if (settings.engine === "kokoro" && AC) setTimeout(() => { loadKokoro().catch(() => {}); }, 1200);
-$("testVoice").addEventListener("click", () => speak("This is how I sound. Adjust me until I feel right.", () => setState("idle")));
+$("testVoice").addEventListener("click", () => speak("This is how I sound. The cabin is quiet, and the air is clean. Adjust me until I feel right.", () => setState("idle")));
 
 function renderLines(){
   const ul = $("lineList"); ul.innerHTML = "";

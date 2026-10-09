@@ -1,6 +1,6 @@
 // Vesta offline cache. Pages load fresh when online (so updates show right away)
 // and fall back to the cached copy offline; icons and fonts come from cache first.
-const CACHE = "vesta-v12";
+const CACHE = "vesta-v14";
 const SHELL = [
   "./",
   "./index.html",
