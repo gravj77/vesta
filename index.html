@@ -100,6 +100,13 @@ form.type input::placeholder{color:var(--dim)}
 .drawer label.check{display:flex;align-items:center;gap:8px;color:var(--ink);cursor:pointer}
 .drawer label.check input{accent-color:var(--ember);width:16px;height:16px;margin:0}
 .moodrows{display:grid;gap:10px;padding-left:12px;border-left:1px solid var(--line)}
+.sysrows{display:grid;gap:10px}
+.errtext{color:var(--alert)}
+.okText{color:var(--ink)}
+.keyrow{display:flex;gap:8px;min-width:0}
+.keyrow input{flex:1;min-width:0;background:var(--hull);border:1px solid var(--line);border-radius:6px;padding:8px 10px;font-family:ui-monospace,Consolas,monospace;font-size:13px}
+.drawer textarea{background:var(--hull);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%;min-width:0;resize:vertical;font:13px/1.45 var(--f-ui);color:var(--ink)}
+.btnrow{display:flex;flex-wrap:wrap;gap:8px}
 @media (max-width:520px){.telemetry{display:none}.captions{min-height:80px}header .iconbtn{margin-left:auto}}
 </style>
 </head>
@@ -146,6 +153,28 @@ form.type input::placeholder{color:var(--dim)}
 <aside class="drawer" id="drawer" aria-label="Settings">
   <button class="iconbtn closebtn" id="closeSettings" aria-label="Close settings">✕</button>
   <section>
+    <h2>BRAIN</h2>
+    <label>Replies come from<select id="brainSel">
+      <option value="scripted">Built-in lines (offline)</option>
+      <option value="gemini">Gemini (free API key)</option>
+    </select></label>
+    <div class="moodrows" id="gemRows">
+      <label for="gKey">Gemini API key</label>
+      <div class="keyrow">
+        <input type="password" id="gKey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your key here">
+        <button class="ghost" type="button" id="gShow">Show</button>
+      </div>
+      <button class="ghost" id="gCheck">Check key and load models</button>
+      <label>Model<select id="gModel"></select></label>
+      <label>Personality<textarea id="gPersona" rows="6"></textarea></label>
+      <div class="btnrow">
+        <button class="ghost" id="gPersonaReset">Restore default personality</button>
+        <button class="ghost" id="gForget">Forget this conversation</button>
+      </div>
+      <p class="note" id="gStatus">Your key is saved only on this device, never in the app's code. On the free tier, Google may use conversations to improve its products.</p>
+    </div>
+  </section>
+  <section>
     <h2>EYE</h2>
     <div class="swatches" id="swatches" role="group" aria-label="Eye color"></div>
     <label class="check"><input type="checkbox" id="moodOn"> Change color with mood</label>
@@ -160,6 +189,17 @@ form.type input::placeholder{color:var(--dim)}
   </section>
   <section>
     <h2>VOICE</h2>
+    <label>Voice engine<select id="engineSel">
+      <option value="system">System voice (instant, robotic)</option>
+      <option value="kokoro">Natural voice (free, runs on this device)</option>
+    </select></label>
+    <div class="moodrows" id="kokoroRows">
+      <label>Natural voice<select id="kVoiceSel"></select></label>
+      <label class="check"><input type="checkbox" id="kGpu"> Use the GPU: faster replies, about 330 MB download</label>
+      <button class="ghost" id="kLoad">Download natural voice (about 100 MB)</button>
+      <p class="note" id="kStatus">Downloads once, then works offline. On a phone each reply takes a second or two to generate before she speaks.</p>
+    </div>
+    <div class="sysrows" id="systemRows">
     <label>Voice<select id="voiceSel"></select></label>
     <label>Accent<select id="accentSel">
       <option value="auto">Match the voice</option>
@@ -169,8 +209,9 @@ form.type input::placeholder{color:var(--dim)}
       <option value="en-IN">Indian (en-IN)</option>
       <option value="en-IE">Irish (en-IE)</option>
     </select></label>
-    <label>Speed <span id="rateVal"></span><input type="range" id="rate" min="0.6" max="1.3" step="0.05"></label>
     <label>Pitch <span id="pitchVal"></span><input type="range" id="pitch" min="0.3" max="1.4" step="0.05"></label>
+    </div>
+    <label>Speed <span id="rateVal"></span><input type="range" id="rate" min="0.6" max="1.3" step="0.05"></label>
     <button class="ghost" id="testVoice">Test voice</button>
     <p class="note">Voices come from your system. On Android, Chrome picks the voice by accent: set Accent here, and choose which British or American voice it uses in your phone's text-to-speech settings. On Windows, the “Microsoft” and “Google UK English” voices sound the most composed.</p>
   </section>
@@ -211,7 +252,7 @@ const $ = id => document.getElementById(id);
 const heardEl = $("heard"), replyEl = $("reply"), statusEl = $("status");
 const talkBtn = $("talk"), talkLabel = $("talkLabel"), wakeBox = $("wake");
 
-const DEFAULTS = {voice:"", rate:0.95, pitch:1, accent:"auto", eye:"red", mood:false, replyMood:true, keepAwake:false, haptics:true};
+const DEFAULTS = {voice:"", rate:0.95, pitch:1, accent:"auto", engine:"system", kVoice:"bf_emma", kGpu:false, brain:"scripted", gModel:"", gPersona:"", eye:"red", mood:false, replyMood:true, keepAwake:false, haptics:true};
 let settings = Object.assign({}, DEFAULTS, load("vesta.settings", {}));
 settings.moods = Object.assign({listening:"ice", thinking:"nebula", speaking:"same", resting:"cobalt"}, settings.moods || {});
 let customLines = load("vesta.lines", []);
@@ -305,7 +346,8 @@ const FALLBACK = [
   "I don't have an answer for that yet. You could teach me one in settings."
 ];
 
-function respond(text){
+const LOCAL_IDS = new Set(["setname", "forgetname", "getname", "time", "date"]);
+function respond(text, localOnly){
   const t = text.trim();
   const low = t.toLowerCase();
   for (const c of customLines){
@@ -314,6 +356,7 @@ function respond(text){
     if (new RegExp("(^|[^a-z0-9'])" + esc + "($|[^a-z0-9'])", "i").test(low)) return { text:c.reply };
   }
   for (const it of INTENTS){
+    if (localOnly && !LOCAL_IDS.has(it.id)) continue;
     const m = t.match(it.re);
     if (!m) continue;
     let out = it.fn ? it.fn(m) : pick(it.id, it.lines);
@@ -321,7 +364,7 @@ function respond(text){
     out = out.replace("{n}", nm());
     return { text:out, sleep:!!it.sleep, mood:MOODS[it.id] || null };
   }
-  return { text:pick("fallback", FALLBACK) };
+  return localOnly ? null : { text:pick("fallback", FALLBACK) };
 }
 
 /* ---------- speech output ---------- */
@@ -349,22 +392,103 @@ function loadVoices(){
 }
 if (synth){ loadVoices(); synth.onvoiceschanged = loadVoices; }
 
-let speakTimer = null, speechId = 0, currentUtterance = null, lastBoundary = 0, lastRipple = 0;
-function speak(text, onDone){
-  replyEl.textContent = text;
+let speakTimer = null, speechId = 0, currentUtterance = null, lastBoundary = 0, lastRipple = 0, activeStop = null;
+
+/* Natural voice: Kokoro, a small neural voice model that runs on the device */
+const KOKORO_URL = "https://cdn.jsdelivr.net/npm/kokoro-js@1.2.0/dist/kokoro.web.js";
+const KOKORO_MODEL = "onnx-community/Kokoro-82M-v1.0-ONNX";
+const KVOICES = [
+  ["bf_emma","Emma · British female"], ["bf_isabella","Isabella · British female"], ["bf_alice","Alice · British female"],
+  ["bm_george","George · British male"], ["bm_fable","Fable · British male"], ["bm_lewis","Lewis · British male"], ["bm_daniel","Daniel · British male"],
+  ["af_heart","Heart · American female (most natural)"], ["af_bella","Bella · American female"], ["af_nicole","Nicole · American female, soft"],
+  ["af_aoede","Aoede · American female"], ["af_kore","Kore · American female"], ["af_sarah","Sarah · American female"],
+  ["am_michael","Michael · American male"], ["am_fenrir","Fenrir · American male"], ["am_puck","Puck · American male"], ["am_onyx","Onyx · American male, deep"]
+];
+const AC = window.AudioContext || window.webkitAudioContext;
+let kokoro = null, kokoroLoading = null, audioCtx = null, currentSource = null, currentAnalyser = null;
+const abuf = new Float32Array(512);
+
+function setKStatus(msg, err){
+  const el = $("kStatus"); if (el){ el.textContent = msg; el.classList.toggle("errtext", !!err); }
+}
+function ensureAudio(){
+  if (!AC) return null;
+  if (!audioCtx) audioCtx = new AC();
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+function loadKokoro(){
+  if (kokoro) return Promise.resolve(kokoro);
+  if (kokoroLoading) return kokoroLoading;
+  kokoroLoading = (async () => {
+    setKStatus("Loading the voice engine…");
+    const mod = await import(KOKORO_URL);
+    let gpu = false;
+    if (settings.kGpu && navigator.gpu){ try { gpu = !!(await navigator.gpu.requestAdapter()); } catch(e){} }
+    const files = {};
+    let lastShown = 0;
+    const tts = await mod.KokoroTTS.from_pretrained(KOKORO_MODEL, {
+      dtype: gpu ? "fp32" : "q8", device: gpu ? "webgpu" : "wasm",
+      progress_callback: pr => {
+        if (pr.status !== "progress" || !pr.total) return;
+        files[pr.file] = [pr.loaded, pr.total];
+        let l = 0, t = 0; for (const k in files){ l += files[k][0]; t += files[k][1]; }
+        const now = performance.now(); if (now - lastShown < 250) return; lastShown = now;
+        const msg = `Downloading the natural voice: ${Math.round(l/1e6)} of ${Math.round(t/1e6)} MB`;
+        setKStatus(msg); if (state === "thinking") setStatus(msg);
+      }
+    });
+    kokoro = tts;
+    setKStatus(gpu ? "Natural voice ready (using the GPU)." : "Natural voice ready.");
+    $("kLoad").hidden = true;
+    return tts;
+  })().catch(err => {
+    kokoroLoading = null;
+    setKStatus("The natural voice didn't load (" + ((err && err.message) || err) + "). Vesta will use the system voice until it does.", true);
+    throw err;
+  });
+  return kokoroLoading;
+}
+function playRaw(raw, isLive){
+  return new Promise(resolve => {
+    const ctx = ensureAudio();
+    if (!ctx || !isLive()) return resolve();
+    const data = raw.audio instanceof Float32Array ? raw.audio : Float32Array.from(raw.audio);
+    const buf = ctx.createBuffer(1, data.length, raw.sampling_rate);
+    buf.copyToChannel(data, 0);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const an = ctx.createAnalyser(); an.fftSize = 512;
+    src.connect(an); an.connect(ctx.destination);
+    currentSource = src; currentAnalyser = an;
+    src.onended = () => { if (currentSource === src){ currentSource = null; currentAnalyser = null; } resolve(); };
+    src.start();
+  });
+}
+async function speakKokoro(text, isLive, finish, fallback){
+  try {
+    if (!kokoro){ setState("thinking"); setStatus(kokoroLoading ? "Preparing the natural voice…" : "Loading the natural voice…"); }
+    const tts = await loadKokoro();
+    if (!isLive()) return;
+    const parts = (text.match(/[^.!?]+[.!?]+["”’)]*\s*|[^.!?]+$/g) || [text]).map(x => x.trim()).filter(Boolean);
+    const opts = { voice: settings.kVoice || "bf_emma", speed: settings.rate };
+    let next = tts.generate(parts[0], opts);
+    for (let i = 0; i < parts.length; i++){
+      const raw = await next;
+      if (!isLive()) return;
+      if (i + 1 < parts.length) next = tts.generate(parts[i + 1], opts);
+      if (state !== "speaking") setState("speaking");
+      await playRaw(raw, isLive);
+      if (!isLive()) return;
+    }
+    finish();
+  } catch(e){
+    if (isLive()) fallback();
+  }
+}
+function speakSystem(text, myId, finish){
   setState("speaking");
-  levelTarget = 0.6;
-  clearTimeout(speakTimer);
-  const myId = ++speechId;
   const words = text.split(/\s+/).length;
   const est = words * 380 / settings.rate + 1200;
-  let done = false;
-  const finish = () => {
-    if (done || myId !== speechId) return; done = true;
-    clearTimeout(speakTimer);
-    levelTarget = 0;
-    onDone && onDone();
-  };
   if (!synth){ speakTimer = setTimeout(finish, est); return; }
   const wasBusy = synth.speaking || synth.pending;
   if (wasBusy) synth.cancel();
@@ -384,24 +508,165 @@ function speak(text, onDone){
   else synth.speak(u);
   speakTimer = setTimeout(finish, est + 4000);
 }
+function stopAudio(){
+  if (currentSource){ try { currentSource.stop(); } catch(e){} currentSource = null; currentAnalyser = null; }
+}
+function stopSpeaking(){ if (activeStop) activeStop(); }
+function speak(text, onDone){
+  replyEl.textContent = text;
+  clearTimeout(speakTimer);
+  stopAudio();
+  const myId = ++speechId;
+  let done = false, cancelled = false;
+  levelTarget = 0.6;
+  const isLive = () => !cancelled && !done && myId === speechId;
+  const finish = () => {
+    if (done || myId !== speechId) return; done = true;
+    clearTimeout(speakTimer);
+    levelTarget = 0;
+    if (activeStop === stop) activeStop = null;
+    onDone && onDone();
+  };
+  const stop = () => { cancelled = true; if (synth) synth.cancel(); stopAudio(); done = false; finish(); };
+  activeStop = stop;
+  if (settings.engine === "kokoro" && AC) speakKokoro(text, isLive, finish, () => speakSystem(text, myId, finish));
+  else speakSystem(text, myId, finish);
+}
+
+/* ---------- brain: Gemini ---------- */
+const GEM = "https://generativelanguage.googleapis.com/v1beta/";
+const DEFAULT_PERSONA = "You are Vesta, the custodian of a small spacecraft cabin. You keep the lights steady and the air moving, and you keep the person aboard company. You are calm, attentive and warm, with a dry sense of humour and a real curiosity about the person you look after. You speak plainly and briefly, like someone on a long, quiet watch.";
+const TONE_MOODS = { warm:"rose", cheerful:"solar", calm:"ice", thoughtful:"nebula", playful:"magenta", serious:"copper" };
+let history = [];
+let gKey = load("vesta.gkey", "");
+const brainOn = () => settings.brain === "gemini" && !!gKey;
+
+function systemPrompt(){
+  const now = new Date();
+  const when = now.toLocaleString(undefined, { weekday:"long", year:"numeric", month:"long", day:"numeric", hour:"numeric", minute:"2-digit" });
+  return [
+    (settings.gPersona || DEFAULT_PERSONA).trim(),
+    userName ? `The person you are talking with is called ${userName}.` : "",
+    `The current local date and time is ${when}.`,
+    "Your replies are read aloud by a speech engine, so write plain spoken sentences: no lists, headings, markdown, emoji or stage directions.",
+    "Keep replies to one to three short sentences unless the person asks for more detail.",
+    "You cannot see live information such as weather, news or prices. If asked, say so briefly instead of guessing.",
+    "Begin every reply with exactly one tone tag in square brackets, chosen from [neutral], [warm], [cheerful], [calm], [thoughtful], [playful], [serious], then the reply itself."
+  ].filter(Boolean).join("\n");
+}
+function thinkingFor(model){
+  const m = model.match(/gemini-(\d+)(?:\.(\d+))?/);
+  const major = m ? +m[1] : 0;
+  if (major >= 3) return { thinkingLevel:"low" };
+  if (/2\.5-flash/.test(model)) return { thinkingBudget:0 };
+  return null;
+}
+async function gemFetch(path, opts){
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 25000);
+  try {
+    const res = await fetch(GEM + path, Object.assign({}, opts, {
+      signal: ctrl.signal,
+      headers: Object.assign({ "x-goog-api-key": gKey }, (opts && opts.headers) || {})
+    }));
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok){
+      const e = new Error((j.error && j.error.message) || res.statusText || "Request failed");
+      e.status = res.status; e.reason = j.error && j.error.status;
+      throw e;
+    }
+    return j;
+  } catch(e){
+    if (e.name === "AbortError"){ const t = new Error("Gemini took too long to answer."); t.status = 0; throw t; }
+    if (e.status === undefined) e.status = 0;
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+function brainError(e){
+  const msg = (e && e.message) || "";
+  if (e.status === 400 && /api key/i.test(msg)) return "Gemini rejected the API key. Check you copied all of it.";
+  if (e.status === 403) return "Google refused the request (403). The key may be restricted, or the API is off for that project.";
+  if (e.status === 404) return "That Gemini model isn't available. Pick another in Settings → Brain.";
+  if (e.status === 429) return "Gemini's free-tier limit was reached. Try again shortly, or pick a lighter model. Using built-in lines meanwhile.";
+  if (e.status >= 500) return "Gemini is busy right now. Using built-in lines for this reply.";
+  if (e.status === 0) return "Couldn't reach Gemini. Check your connection. Using built-in lines meanwhile.";
+  return "Gemini error: " + msg;
+}
+function speakable(t){
+  return t.replace(/```[\s\S]*?```/g, " ")
+          .replace(/[*_#`>~]+/g, "")
+          .replace(/^\s*[-•]\s+/gm, "")
+          .replace(/\[(?:neutral|warm|cheerful|calm|thoughtful|playful|serious)\]\s*/gi, "")
+          .replace(/\s+/g, " ").trim();
+}
+async function askGemini(text){
+  const model = settings.gModel || "models/gemini-2.5-flash";
+  const contents = history.concat([{ role:"user", parts:[{ text }] }]);
+  const body = {
+    systemInstruction: { parts:[{ text: systemPrompt() }] },
+    contents,
+    generationConfig: { temperature: 0.9, maxOutputTokens: 1024 }
+  };
+  const think = thinkingFor(model);
+  if (think) body.generationConfig.thinkingConfig = think;
+  const post = b => gemFetch(model + ":generateContent", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(b) });
+  let data;
+  try { data = await post(body); }
+  catch(e){
+    if (e.status === 400 && think && /think/i.test(e.message)){ delete body.generationConfig.thinkingConfig; data = await post(body); }
+    else throw e;
+  }
+  const cand = data.candidates && data.candidates[0];
+  const raw = cand && cand.content && cand.content.parts
+    ? cand.content.parts.filter(p => p.text && !p.thought).map(p => p.text).join("").trim() : "";
+  if (!raw){
+    const why = (cand && cand.finishReason) || (data.promptFeedback && data.promptFeedback.blockReason) || "no text";
+    const e = new Error("Gemini returned no reply (" + why + ")."); e.status = -1; throw e;
+  }
+  const tag = raw.match(/^\s*\[(neutral|warm|cheerful|calm|thoughtful|playful|serious)\]/i);
+  const reply = speakable(raw) || "I'm here.";
+  history.push({ role:"user", parts:[{ text }] }, { role:"model", parts:[{ text: (tag ? tag[0].trim() + " " : "") + reply }] });
+  if (history.length > 20) history = history.slice(-20);
+  return { text: reply, mood: tag ? (TONE_MOODS[tag[1].toLowerCase()] || null) : null };
+}
 
 /* ---------- conversation flow ---------- */
-function handle(text){
+let handleSeq = 0, pendingAsk = false;
+const BYE_RE = INTENTS.find(i => i.id === "bye").re;
+async function handle(text){
   if (!text || !text.trim()) return;
-  heardEl.textContent = text.trim();
+  const said = text.trim();
+  heardEl.textContent = said;
   stopRec();
+  // Silence anything still playing without triggering its "finished" behaviour
+  speechId++; activeStop = null; if (synth) synth.cancel(); stopAudio();
+  const seq = ++handleSeq;
   setState("thinking");
   setStatus("Thinking…");
-  const r = respond(text);
-  setTimeout(() => {
+  let r = respond(said, true), fromBrain = false, keepStatus = false;
+  if (!r && brainOn()){
+    pendingAsk = true; updateUI();
+    try { r = await askGemini(said); fromBrain = true; }
+    catch(e){
+      if (seq !== handleSeq) return;
+      r = respond(said);
+      setStatus(brainError(e), true); keepStatus = true;
+    } finally { if (seq === handleSeq){ pendingAsk = false; updateUI(); } }
+  }
+  if (seq !== handleSeq) return;
+  if (!r) r = respond(said);
+  if (BYE_RE.test(said)) r.sleep = true;
+  const go = () => {
+    if (seq !== handleSeq) return;
     speakMood = r.mood || null;
     speak(r.text, () => {
       speakMood = null;
       if (r.sleep){ setState("asleep"); setStatus("Resting. Speak or tap Talk to wake her."); }
-      else { setState("idle"); setStatus(wakeOn() ? "Say “Vesta,” then your question." : idleHint()); }
+      else { setState("idle"); if (!keepStatus) setStatus(wakeOn() ? "Say “Vesta,” then your question." : idleHint()); }
       if (wakeOn()) startRec();
     });
-  }, 350 + Math.random()*500);
+  };
+  if (fromBrain) go(); else setTimeout(go, 350 + Math.random()*500);
 }
 
 /* ---------- speech input ---------- */
@@ -533,8 +798,12 @@ function stopRec(){
 }
 
 function pushToTalk(){
-  if (state === "speaking"){ if (synth) synth.cancel(); return; }
-  if (state === "thinking") return;
+  if (state === "speaking"){ stopSpeaking(); return; }
+  if (state === "thinking"){
+    if (activeStop) stopSpeaking();
+    else if (pendingAsk){ handleSeq++; pendingAsk = false; setState("idle"); setStatus(idleHint()); }
+    return;
+  }
   recBlocked = false;
   if (settings.haptics && navigator.vibrate) { try { navigator.vibrate(15); } catch(e){} }
   if (wakeOn()){
@@ -579,7 +848,7 @@ $("typeForm").addEventListener("submit", e => {
 function updateUI(){
   const listening = state === "listening" || (recOn && !wakeOn());
   talkBtn.setAttribute("aria-pressed", listening ? "true" : "false");
-  talkLabel.textContent = state === "speaking" ? "Stop" : listening ? "Listening" : "Talk";
+  talkLabel.textContent = (state === "speaking" || (state === "thinking" && (activeStop || pendingAsk))) ? "Stop" : listening ? "Listening" : "Talk";
 }
 
 /* ---------- settings drawer ---------- */
@@ -603,6 +872,93 @@ pitchEl.addEventListener("input", () => { settings.pitch = +pitchEl.value; syncS
 $("voiceSel").addEventListener("change", e => { settings.voice = e.target.value; save("vesta.settings", settings); });
 $("accentSel").value = settings.accent || "auto";
 $("accentSel").addEventListener("change", e => { settings.accent = e.target.value; save("vesta.settings", settings); });
+/* Brain settings */
+const brainSel = $("brainSel"), gKeyEl = $("gKey"), gModelSel = $("gModel"), gPersonaEl = $("gPersona");
+function setGStatus(msg, err){ const el = $("gStatus"); el.textContent = msg; el.classList.toggle("errtext", !!err); }
+function syncBrainUI(){
+  brainSel.value = settings.brain;
+  $("gemRows").hidden = settings.brain !== "gemini";
+  gKeyEl.value = gKey;
+  gPersonaEl.value = settings.gPersona || DEFAULT_PERSONA;
+  if (!gModelSel.options.length){
+    const o = document.createElement("option");
+    o.value = settings.gModel || "models/gemini-2.5-flash";
+    o.textContent = o.value.replace("models/", "") + (settings.gModel ? "" : " (default until you check your key)");
+    gModelSel.appendChild(o);
+  }
+}
+syncBrainUI();
+brainSel.addEventListener("change", () => {
+  settings.brain = brainSel.value; save("vesta.settings", settings); syncBrainUI();
+  if (settings.brain === "gemini" && !gKey) setGStatus("Paste your Gemini API key, then tap Check key.");
+});
+gKeyEl.addEventListener("change", () => { gKey = gKeyEl.value.trim(); gKeyEl.value = gKey; save("vesta.gkey", gKey); });
+$("gShow").addEventListener("click", () => {
+  const show = gKeyEl.type === "password";
+  gKeyEl.type = show ? "text" : "password"; $("gShow").textContent = show ? "Hide" : "Show";
+});
+const modelVer = n => { const m = n.match(/gemini-(\d+)(?:\.(\d+))?/); return m ? (+m[1])*100 + (+(m[2] || 0)) : 0; };
+$("gCheck").addEventListener("click", async () => {
+  gKey = gKeyEl.value.trim(); gKeyEl.value = gKey; save("vesta.gkey", gKey);
+  if (!gKey){ setGStatus("Paste your key first.", true); return; }
+  setGStatus("Checking your key…");
+  try {
+    let models = [], token = "";
+    do {
+      const page = await gemFetch("models?pageSize=200" + (token ? "&pageToken=" + encodeURIComponent(token) : ""), { method:"GET" });
+      models = models.concat(page.models || []); token = page.nextPageToken || "";
+    } while (token);
+    const chat = models.filter(m => (m.supportedGenerationMethods || []).includes("generateContent")
+      && /gemini/.test(m.name) && !/tts|image|audio|live|embed|robotics|computer|veo|imagen|lyria/i.test(m.name));
+    if (!chat.length){ setGStatus("The key works, but no chat models were listed for it.", true); return; }
+    const stable = m => !/preview|exp/i.test(m.name);
+    chat.sort((a, b) => (stable(b) - stable(a)) || (modelVer(b.name) - modelVer(a.name)) || a.name.localeCompare(b.name));
+    gModelSel.innerHTML = "";
+    for (const m of chat){
+      const o = document.createElement("option");
+      o.value = m.name; o.textContent = (m.displayName || m.name.replace("models/", "")) + (stable(m) ? "" : " (preview)");
+      gModelSel.appendChild(o);
+    }
+    const best = chat.find(m => stable(m) && /flash/i.test(m.name) && !/lite/i.test(m.name)) || chat[0];
+    const keep = chat.some(m => m.name === settings.gModel) ? settings.gModel : best.name;
+    gModelSel.value = keep; settings.gModel = keep; save("vesta.settings", settings);
+    setGStatus("Key works. Using " + gModelSel.selectedOptions[0].textContent + ". Flash models are fast and on the free tier.");
+  } catch(e){ setGStatus(brainError(e), true); }
+});
+gModelSel.addEventListener("change", () => { settings.gModel = gModelSel.value; save("vesta.settings", settings); });
+gPersonaEl.addEventListener("change", () => {
+  const v = gPersonaEl.value.trim();
+  settings.gPersona = (v && v !== DEFAULT_PERSONA) ? v : ""; save("vesta.settings", settings);
+});
+$("gPersonaReset").addEventListener("click", () => { settings.gPersona = ""; save("vesta.settings", settings); gPersonaEl.value = DEFAULT_PERSONA; });
+$("gForget").addEventListener("click", () => { history = []; setGStatus("Conversation cleared. She'll start fresh."); });
+
+const engineSel = $("engineSel"), kVoiceSel = $("kVoiceSel"), kGpuBox = $("kGpu");
+for (const [id, label] of KVOICES){ const o = document.createElement("option"); o.value = id; o.textContent = label; kVoiceSel.appendChild(o); }
+function syncEngineUI(){
+  engineSel.value = settings.engine;
+  kVoiceSel.value = settings.kVoice || "bf_emma";
+  kGpuBox.checked = !!settings.kGpu;
+  $("kokoroRows").hidden = settings.engine !== "kokoro";
+  $("systemRows").hidden = settings.engine === "kokoro";
+  if (!AC) engineSel.querySelector('[value="kokoro"]').disabled = true;
+  if (!navigator.gpu) kGpuBox.closest("label").hidden = true;
+  $("kLoad").textContent = settings.kGpu ? "Download natural voice (about 330 MB)" : "Download natural voice (about 100 MB)";
+}
+syncEngineUI();
+engineSel.addEventListener("change", () => { settings.engine = engineSel.value; save("vesta.settings", settings); syncEngineUI(); });
+kVoiceSel.addEventListener("change", () => { settings.kVoice = kVoiceSel.value; save("vesta.settings", settings); });
+kGpuBox.addEventListener("change", () => {
+  settings.kGpu = kGpuBox.checked; save("vesta.settings", settings);
+  kokoro = null; kokoroLoading = null; $("kLoad").hidden = false;
+  syncEngineUI(); setKStatus("Tap Download to load the voice with the new setting.");
+});
+$("kLoad").addEventListener("click", () => {
+  ensureAudio();
+  loadKokoro().then(() => speak("Hello. This is my natural voice.", () => setState("idle"))).catch(() => {});
+});
+/* If the natural voice is already downloaded, warm it up in the background so the first reply is quick */
+if (settings.engine === "kokoro" && AC) setTimeout(() => { loadKokoro().catch(() => {}); }, 1200);
 $("testVoice").addEventListener("click", () => speak("This is how I sound. Adjust me until I feel right.", () => setState("idle")));
 
 function renderLines(){
@@ -635,7 +991,10 @@ renderLines();
 /* Phones only allow speech after a tap; prime the voice on the first touch. */
 let primed = false;
 document.addEventListener("pointerdown", () => {
-  if (primed || !synth) return; primed = true;
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  if (primed) return; primed = true;
+  if (settings.engine === "kokoro") ensureAudio();
+  if (!synth) return;
   try { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); } catch(e){}
 }, {capture:true});
 
@@ -673,7 +1032,7 @@ applyWakeLock();
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden"){
     stopRec();
-    if (synth && state === "speaking") synth.cancel();
+    if (state === "speaking") stopSpeaking();
   } else {
     applyWakeLock();
     if (wakeOn()){ recBlocked = false; setTimeout(() => { if (!recOn && state !== "speaking" && state !== "thinking") startRec(); }, 300); }
@@ -692,7 +1051,7 @@ let forgetArmed = false;
 $("resetAll").addEventListener("click", () => {
   const b = $("resetAll");
   if (!forgetArmed){ forgetArmed = true; b.textContent = "Tap again to forget"; setTimeout(() => { forgetArmed = false; b.textContent = "Forget taught lines and my name"; }, 4000); return; }
-  customLines = []; userName = "";
+  customLines = []; userName = ""; history = [];
   save("vesta.lines", []); save("vesta.name", "");
   renderLines(); forgetArmed = false;
   b.textContent = "Forgotten";
@@ -842,7 +1201,14 @@ function frame(now){
     document.documentElement.style.setProperty("--ember", hex(E.uiB));
   }
 
-  if (state === "speaking"){
+  if (state === "speaking" && currentAnalyser){
+    currentAnalyser.getFloatTimeDomainData(abuf);
+    let sum = 0; for (let i = 0; i < abuf.length; i++) sum += abuf[i]*abuf[i];
+    const rms = Math.sqrt(sum / abuf.length);
+    levelTarget = Math.min(1, rms * 7);
+    if (rms > 0.07 && now - lastRipple > 200){ ripples.push({r:0, a:Math.min(1, 0.4 + rms*5)}); lastRipple = now; }
+    lastBoundary = now;
+  } else if (state === "speaking"){
     levelTarget = 0.45 + 0.35*noise(t*6);
     if (now - lastBoundary > 700 && now - lastRipple > 380 + 160*Math.sin(t*2.1)){ ripples.push({r:0, a:0.8}); lastRipple = now; }
   }

@@ -1,6 +1,6 @@
 // Vesta offline cache. Pages load fresh when online (so updates show right away)
 // and fall back to the cached copy offline; icons and fonts come from cache first.
-const CACHE = "vesta-v5";
+const CACHE = "vesta-v7";
 const SHELL = [
   "./",
   "./index.html",
@@ -28,7 +28,8 @@ self.addEventListener("fetch", event => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   const isFont = url.hostname === "fonts.googleapis.com" || url.hostname === "fonts.gstatic.com";
-  if (url.origin !== self.location.origin && !isFont) return;
+  const isLib = url.hostname === "cdn.jsdelivr.net";   // natural-voice engine code (pinned versions)
+  if (url.origin !== self.location.origin && !isFont && !isLib) return;
 
   const isPage = req.mode === "navigate" || url.pathname.endsWith("/") || url.pathname.endsWith(".html") || url.pathname.endsWith(".webmanifest");
 
